@@ -2108,23 +2108,59 @@ registerShipmentWebhook("/api/webhooks/pudo", "PUDO", ["PUDO_WEBHOOK_SECRET"], "
 registerShipmentWebhook("/api/webhooks/courier-guy", "Courier Guy", ["TCG_WEBHOOK_SECRET", "PUDO_WEBHOOK_SECRET"], "Courier Guy", true);
 
 // Meta WhatsApp Cloud API webhook (Phone Number ID 1363502856851590, +27 63 801 8790).
-// Wired through Cloudflare: Meta/Cloudflare calls GET for verification (hub.challenge
-// handshake) and POST for message/status events. Inbound messages are stored in
-// whatsapp_messages; outbound replies use the Graph API when WHATSAPP_ACCESS_TOKEN is set.
+// Messaging is brokered by the central Cloudflare Worker (meta-social-hub): inbound
+// events arrive here, outbound replies are sent through the Worker which holds the
+// WhatsApp token. The website never stores a WHATSAPP_ACCESS_TOKEN.
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "1363502856851590";
-const WHATSAPP_API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
+const WHATSAPP_SITE_NUMBER = process.env.WHATSAPP_SITE_NUMBER || "+27638018790";
+const WHATSAPP_BRIDGE_URL = (process.env.WHATSAPP_BRIDGE_URL || "https://meta-social-hub.healthyfieldssa.workers.dev").replace(/\/$/, "");
 
+// Outbound sending goes exclusively through the central Cloudflare bridge.
 async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
-  const token = process.env.WHATSAPP_ACCESS_TOKEN;
-  if (!token) return; // Cloudflare Worker may own sending; without a token we only record.
+  const siteKey = process.env.WHATSAPP_SITE_KEY;
+  if (!siteKey) return;
   try {
-    await externalJson(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    await externalJson(`${WHATSAPP_BRIDGE_URL}/api/whatsapp/send`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ messaging_product: "whatsapp", to: toNumber, type: "text", text: { body: text } }),
+      headers: { "Content-Type": "application/json", "x-whatsapp-site-key": siteKey },
+      body: JSON.stringify({ number: WHATSAPP_SITE_NUMBER, payload: { messaging_product: "whatsapp", to: toNumber, type: "text", text: { body: text } } }),
     });
   } catch (error) {
     console.error("WhatsApp outbound send failed", error instanceof Error ? error.message : error);
+  }
+}
+
+// WhatsApp Business Hours: only auto-reply between 07:00 and 17:00 SAST (UTC+2).
+function withinWhatsAppBusinessHours(): boolean {
+  const sastHour = (new Date().getUTCHours() + 2) % 24;
+  return sastHour >= 7 && sastHour < 17;
+}
+
+// AI-staffed WhatsApp reply: grounded in this site's catalog, shipping, payments and policies.
+async function aiWhatsAppReply(customerMessage: string): Promise<string> {
+  let catalog = "";
+  try {
+    const rows = await query<RowDataPacket[]>("SELECT name, price_zar, short_description FROM products WHERE is_active = 1 AND (status = 'published' OR status IS NULL) ORDER BY is_featured DESC, id ASC LIMIT 25");
+    catalog = (rows as RowDataPacket[]).map((r) => `- ${r.name}: R${Number(r.price_zar)} — ${String(r.short_description || "").slice(0, 120)}`).join("\n");
+  } catch { catalog = "Catalog unavailable."; }
+  const systemPrompt = `You are the AI customer-care agent for Wonderful Dragon Fruit South Africa (DFSA), replying on WhatsApp. Business rules:
+- Professional, friendly, concise WhatsApp style. Reply in the customer's language.
+- NEVER promise delivery dates, stock, or outcomes. Never offer refunds or free shipping. Never accept responsibility for customer or third-party mistakes.
+- Payments accepted: PayFast, Yoco, PayPal. Shipping: PUDO locker collection or The Courier Guy door-to-door across South Africa; international/export quotes via WhatsApp to Head Office +27 83 447 4639.
+- If unsure or asked for anything you cannot verify, reply exactly: "Can I get back to you?"
+- Product catalog (name, price, short description):\n${catalog}`;
+  try {
+    const out = await callNvidiaDirect({
+      messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: customerMessage },
+      ],
+      maxTokens: 350,
+      temperature: 0.4,
+    });
+    return String((out as { text?: string }).text || "").trim() || "Can I get back to you?";
+  } catch {
+    return "Can I get back to you?";
   }
 }
 
@@ -2140,6 +2176,18 @@ app.get("/api/webhooks/whatsapp", (req, res) => {
 });
 
 app.post("/api/webhooks/whatsapp", async (req, res) => {
+  // Bridge authentication: the central Cloudflare Worker sends x-whatsapp-site-key +
+  // x-whatsapp-bridge headers. Also accept Meta-style traffic so the endpoint works
+  // both when the Worker proxies and when Meta calls directly.
+  const siteKey = process.env.WHATSAPP_SITE_KEY;
+  const providedKey = String(req.header("x-whatsapp-site-key") || "");
+  const bridgeHeader = String(req.header("x-whatsapp-bridge") || "");
+  if (siteKey && providedKey && providedKey !== siteKey) {
+    return res.status(401).json(apiError("WhatsApp bridge authentication failed", "WEBHOOK_UNAUTHORIZED", 401));
+  }
+  if (!siteKey && bridgeHeader === "meta-social-hub") {
+    return res.status(401).json(apiError("WhatsApp site key not configured", "WEBHOOK_UNAUTHORIZED", 401));
+  }
   try {
     const payload = (req.body && typeof req.body === "object") ? req.body as Record<string, unknown> : {};
     const entries = Array.isArray(payload.entry) ? payload.entry as Record<string, unknown>[] : [];
@@ -2153,13 +2201,35 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
         const messages = Array.isArray(value.messages) ? value.messages as Record<string, unknown>[] : [];
         for (const message of messages) {
           const text = (message.text as Record<string, unknown> | undefined)?.body;
+          // Dedupe: Meta retries deliveries; skip messages we already stored.
+          const waId = String(message.id || "");
+          if (waId) {
+            const dup = await query<RowDataPacket[]>("SELECT id FROM whatsapp_messages WHERE wa_message_id = ? LIMIT 1", [waId]);
+            if (dup.length) continue;
+          }
           await query(
             "INSERT INTO whatsapp_messages (id, wa_message_id, direction, from_number, to_number, message_type, message_content, status, raw_payload, created_at) VALUES (?, ?, 'inbound', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-            [crypto.randomUUID(), String(message.id || ""), String(message.from || ""), WHATSAPP_PHONE_NUMBER_ID, String(message.type || "unknown"), text ? String(text) : null, "received", JSON.stringify(message)],
+            [crypto.randomUUID(), waId, String(message.from || ""), WHATSAPP_PHONE_NUMBER_ID, String(message.type || "unknown"), text ? String(text) : null, "received", JSON.stringify(message)],
           );
-          // Auto-acknowledge so the customer knows DFSA received the message.
+          // Respond 200 to Meta immediately; process the AI reply asynchronously.
           if (text && String(message.from || "")) {
-            await sendWhatsAppText(String(message.from), "Thank you for contacting Wonderful Dragon Fruit South Africa! A team member will reply shortly. For orders: https://wonderfuldragonfruit.company/shop");
+            const from = String(message.from);
+            const body = String(text);
+            void (async () => {
+              try {
+                let reply: string;
+                if (withinWhatsAppBusinessHours()) {
+                  reply = await aiWhatsAppReply(body);
+                } else {
+                  reply = `Thank you for contacting Wonderful Dragon Fruit South Africa! Our WhatsApp office replies between 07:00 and 17:00 SAST. For urgent help call or WhatsApp Head Office: +27 83 447 4639.`;
+                }
+                await sendWhatsAppText(from, reply);
+                await query("INSERT INTO whatsapp_messages (id, wa_message_id, direction, from_number, to_number, message_type, message_content, status, created_at) VALUES (?, ?, 'outbound', ?, ?, 'text', ?, 'sent', CURRENT_TIMESTAMP)",
+                  [crypto.randomUUID(), `out-${crypto.randomUUID()}`, WHATSAPP_PHONE_NUMBER_ID, from, reply]);
+              } catch (e) {
+                console.error("WhatsApp AI reply failed", e instanceof Error ? e.message : e);
+              }
+            })();
           }
         }
         // Delivery/read status callbacks for messages we or Cloudflare sent
