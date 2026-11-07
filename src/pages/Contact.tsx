@@ -31,8 +31,8 @@ const contactMethods = [
     icon: MessageCircle,
     title: "WhatsApp (Primary)",
     description: "Fastest way to reach us — instant messaging for orders, pricing, and consultations.",
-    contact: "+27 83 447 4639",
-    action: "https://wa.me/27834474639",
+    contact: "+27 63 801 8790",
+    action: "https://wa.me/27638018790",
     actionLabel: "Chat on WhatsApp",
     gradient: "from-emerald-500 to-teal-500",
   },
@@ -58,6 +58,12 @@ const contactMethods = [
 ];
 
 const whatsappNumbers = [
+  {
+    label: "WhatsApp Business (Meta verified)",
+    number: "+27638018790",
+    display: "+27 63 801 8790",
+    isAi: false,
+  },
   {
     label: "Sales, Orders & Farming Advice",
     number: "+27834474639",
@@ -138,7 +144,7 @@ const Contact = () => {
       // Continue to WhatsApp for instant follow-up
       const whatsappMessage = `Hi DFSA! My name is ${name}.${subject ? `\nSubject: ${subject}` : ""}\n\n${message}\n\nEmail: ${email}${phone ? `\nPhone: ${phone}` : ""}`;
       window.open(
-        `https://wa.me/27834474639?text=${encodeURIComponent(whatsappMessage)}`,
+        `https://wa.me/27638018790?text=${encodeURIComponent(whatsappMessage)}`,
         "_blank"
       );
     } finally {

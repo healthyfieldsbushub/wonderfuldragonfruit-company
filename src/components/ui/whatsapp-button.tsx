@@ -10,7 +10,9 @@ interface WhatsAppButtonProps {
   children?: React.ReactNode;
 }
 
-const WHATSAPP_NUMBER = "27834474639";
+// Meta WhatsApp Cloud API business number: +27 63 801 8790 (Phone Number ID 1363502856851590).
+// Messages to this number flow through the Cloudflare-connected webhook at /api/webhooks/whatsapp.
+const WHATSAPP_NUMBER = "27638018790";
 
 export function WhatsAppButton({ 
   message, 

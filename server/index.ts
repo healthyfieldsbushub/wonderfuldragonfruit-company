@@ -2107,6 +2107,82 @@ function registerShipmentWebhook(path: string, courierLabel: string, secretNames
 registerShipmentWebhook("/api/webhooks/pudo", "PUDO", ["PUDO_WEBHOOK_SECRET"], "PUDO");
 registerShipmentWebhook("/api/webhooks/courier-guy", "Courier Guy", ["TCG_WEBHOOK_SECRET", "PUDO_WEBHOOK_SECRET"], "Courier Guy", true);
 
+// Meta WhatsApp Cloud API webhook (Phone Number ID 1363502856851590, +27 63 801 8790).
+// Wired through Cloudflare: Meta/Cloudflare calls GET for verification (hub.challenge
+// handshake) and POST for message/status events. Inbound messages are stored in
+// whatsapp_messages; outbound replies use the Graph API when WHATSAPP_ACCESS_TOKEN is set.
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "1363502856851590";
+const WHATSAPP_API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
+
+async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!token) return; // Cloudflare Worker may own sending; without a token we only record.
+  try {
+    await externalJson(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", to: toNumber, type: "text", text: { body: text } }),
+    });
+  } catch (error) {
+    console.error("WhatsApp outbound send failed", error instanceof Error ? error.message : error);
+  }
+}
+
+app.get("/api/webhooks/whatsapp", (req, res) => {
+  const mode = String(req.query["hub.mode"] || "");
+  const token = String(req.query["hub.verify_token"] || "");
+  const challenge = String(req.query["hub.challenge"] || "");
+  const expected = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (mode === "subscribe" && expected && token === expected) {
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).json(apiError("WhatsApp verification failed", "WEBHOOK_UNAUTHORIZED", 403));
+});
+
+app.post("/api/webhooks/whatsapp", async (req, res) => {
+  try {
+    const payload = (req.body && typeof req.body === "object") ? req.body as Record<string, unknown> : {};
+    const entries = Array.isArray(payload.entry) ? payload.entry as Record<string, unknown>[] : [];
+    for (const entry of entries) {
+      const changes = Array.isArray(entry.changes) ? entry.changes as Record<string, unknown>[] : [];
+      for (const change of changes) {
+        const value = (change.value && typeof change.value === "object") ? change.value as Record<string, unknown> : {};
+        const contacts = Array.isArray(value.contacts) ? value.contacts as Record<string, unknown>[] : [];
+        const profileName = contacts.length ? String((contacts[0].profile as Record<string, unknown> | undefined)?.wa_name || "") : "";
+        // Inbound customer messages
+        const messages = Array.isArray(value.messages) ? value.messages as Record<string, unknown>[] : [];
+        for (const message of messages) {
+          const text = (message.text as Record<string, unknown> | undefined)?.body;
+          await query(
+            "INSERT INTO whatsapp_messages (id, wa_message_id, direction, from_number, to_number, message_type, message_content, status, raw_payload, created_at) VALUES (?, ?, 'inbound', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [crypto.randomUUID(), String(message.id || ""), String(message.from || ""), WHATSAPP_PHONE_NUMBER_ID, String(message.type || "unknown"), text ? String(text) : null, "received", JSON.stringify(message)],
+          );
+          // Auto-acknowledge so the customer knows DFSA received the message.
+          if (text && String(message.from || "")) {
+            await sendWhatsAppText(String(message.from), "Thank you for contacting Wonderful Dragon Fruit South Africa! A team member will reply shortly. For orders: https://wonderfuldragonfruit.company/shop");
+          }
+        }
+        // Delivery/read status callbacks for messages we or Cloudflare sent
+        const statuses = Array.isArray(value.statuses) ? value.statuses as Record<string, unknown>[] : [];
+        for (const status of statuses) {
+          const waId = String(status.id || "");
+          if (waId) {
+            await query(
+              "UPDATE whatsapp_messages SET status = ? WHERE wa_message_id = ?",
+              [String(status.status || "unknown"), waId],
+            );
+          }
+        }
+      }
+    }
+    // Always 200 — Meta retries non-2xx indefinitely.
+    return res.json({ received: true });
+  } catch (error) {
+    console.error("WhatsApp webhook error", error instanceof Error ? error.message : error);
+    return res.json({ received: true });
+  }
+});
+
 app.post("/api/functions/:name", async (req, res) => {
   try {
     const data = await handleFunction(req.params.name, req.body || {}, req);
