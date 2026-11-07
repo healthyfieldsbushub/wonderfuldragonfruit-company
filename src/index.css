@@ -1,0 +1,400 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Wonderful Dragon Fruit South Africa Design System
+   Fresh greens, vibrant pinks, clean whites - tropical dragon fruit aesthetic
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
+
+@layer base {
+  :root {
+    /* Primary: Vibrant Dragon Fruit Pink/Magenta */
+    --primary: 330 80% 55%;
+    --primary-foreground: 0 0% 100%;
+    
+    /* Background: Clean White with slight green tint */
+    --background: 120 20% 98%;
+    --foreground: 150 30% 15%;
+    
+    /* Card: Pure White */
+    --card: 0 0% 100%;
+    --card-foreground: 150 30% 15%;
+    
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 30% 15%;
+    
+    /* Secondary: Fresh Dragon Fruit Green (Stem/Leaf) */
+    --secondary: 140 60% 40%;
+    --secondary-foreground: 0 0% 100%;
+    
+    /* Accent: Golden Yellow (Flesh/Highlight) */
+    --accent: 45 90% 55%;
+    --accent-foreground: 150 30% 15%;
+    
+    /* Muted: Light Grey-Green */
+    --muted: 140 15% 92%;
+    --muted-foreground: 150 15% 45%;
+    
+    /* Destructive */
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Border & Input */
+    --border: 140 15% 88%;
+    --input: 140 15% 90%;
+    --ring: 330 80% 55%;
+    
+    --radius: 0.75rem;
+    
+    /* Dragon Fruit Custom Tokens */
+    --dragon-pink: 330 80% 55%;
+    --dragon-magenta: 320 75% 45%;
+    --dragon-green: 140 60% 40%;
+    --dragon-lime: 90 55% 50%;
+    --dragon-white: 0 0% 98%;
+    --dragon-gold: 45 95% 55%;
+    --dragon-dark: 150 40% 12%;
+    
+    /* Glass Effect - Clean */
+    --glass-bg: 0 0% 100% / 0.85;
+    --glass-border: 140 20% 90% / 0.6;
+    --glass-shadow: 150 30% 20% / 0.08;
+    
+    /* Gradients */
+    --gradient-dragon: linear-gradient(135deg, hsl(330 80% 55%), hsl(320 75% 45%));
+    --gradient-fresh: linear-gradient(135deg, hsl(140 60% 40%), hsl(90 55% 50%));
+    --gradient-tropical: linear-gradient(135deg, hsl(330 80% 55%), hsl(45 90% 55%));
+    --gradient-hero: linear-gradient(180deg, hsl(140 60% 30% / 0.8), hsl(330 80% 40% / 0.6));
+
+    /* Sidebar */
+    --sidebar-background: 140 20% 96%;
+    --sidebar-foreground: 150 30% 20%;
+    --sidebar-primary: 330 80% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 140 20% 92%;
+    --sidebar-accent-foreground: 150 30% 20%;
+    --sidebar-border: 140 15% 88%;
+    --sidebar-ring: 330 80% 55%;
+  }
+
+  .dark {
+    /* Dark mode with fresh undertones */
+    --primary: 330 75% 60%;
+    --primary-foreground: 0 0% 100%;
+    
+    --background: 150 30% 6%;
+    --foreground: 140 15% 95%;
+    
+    --card: 150 25% 10%;
+    --card-foreground: 140 15% 95%;
+    
+    --popover: 150 25% 8%;
+    --popover-foreground: 140 15% 95%;
+    
+    --secondary: 140 50% 35%;
+    --secondary-foreground: 0 0% 100%;
+    
+    --accent: 45 80% 50%;
+    --accent-foreground: 150 30% 10%;
+    
+    --muted: 150 20% 15%;
+    --muted-foreground: 140 12% 60%;
+    
+    --destructive: 0 60% 45%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 150 20% 18%;
+    --input: 150 20% 20%;
+    --ring: 330 75% 60%;
+    
+    --glass-bg: 150 25% 10% / 0.9;
+    --glass-border: 150 20% 22% / 0.5;
+    --glass-shadow: 0 0% 0% / 0.4;
+    
+    --sidebar-background: 150 25% 8%;
+    --sidebar-foreground: 140 15% 92%;
+    --sidebar-primary: 330 75% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 150 20% 14%;
+    --sidebar-accent-foreground: 140 15% 92%;
+    --sidebar-border: 150 20% 16%;
+    --sidebar-ring: 330 75% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+}
+
+@layer components {
+  /* Glass Card Effect */
+  .glass-card {
+    @apply rounded-xl border;
+    background: hsl(var(--glass-bg));
+    border-color: hsl(var(--glass-border));
+    backdrop-filter: blur(16px);
+    box-shadow: 
+      0 8px 32px hsl(var(--glass-shadow)),
+      inset 0 1px 0 hsl(0 0% 100% / 0.2);
+  }
+
+  .glass-card-strong {
+    @apply glass-card;
+    backdrop-filter: blur(24px);
+    background: hsl(0 0% 100% / 0.9);
+  }
+
+  /* Gradient Text */
+  .text-gradient-dragon {
+    background: var(--gradient-dragon);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-fresh {
+    background: var(--gradient-fresh);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-tropical {
+    background: var(--gradient-tropical);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Tropical Pattern Decoration */
+  .tropical-border {
+    position: relative;
+  }
+  
+  .tropical-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 2px solid transparent;
+    border-image: repeating-linear-gradient(
+      45deg,
+      hsl(var(--primary)) 0px,
+      hsl(var(--primary)) 4px,
+      transparent 4px,
+      transparent 8px,
+      hsl(var(--secondary)) 8px,
+      hsl(var(--secondary)) 12px,
+      transparent 12px,
+      transparent 16px
+    ) 1;
+    pointer-events: none;
+  }
+
+  /* Animated Underline */
+  .animated-underline {
+    position: relative;
+  }
+  
+  .animated-underline::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    width: 0;
+    height: 2px;
+    background: var(--gradient-dragon);
+    transition: width 0.3s ease;
+  }
+  
+  .animated-underline:hover::after {
+    width: 100%;
+  }
+
+  /* Dragon Pink Button */
+  .btn-dragon {
+    @apply px-6 py-3 rounded-lg font-semibold text-white transition-all duration-300;
+    background: var(--gradient-dragon);
+    box-shadow: 0 4px 15px hsl(330 80% 55% / 0.3);
+  }
+  
+  .btn-dragon:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px hsl(330 80% 55% / 0.4);
+  }
+
+  .btn-dragon:active {
+    transform: translateY(0);
+  }
+
+  /* Fresh Green Button */
+  .btn-fresh {
+    @apply px-6 py-3 rounded-lg font-semibold text-white transition-all duration-300;
+    background: var(--gradient-fresh);
+    box-shadow: 0 4px 15px hsl(140 60% 40% / 0.3);
+  }
+  
+  .btn-fresh:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px hsl(140 60% 40% / 0.4);
+  }
+
+  /* Sunset Button - Keep for compatibility */
+  .btn-sunset {
+    @apply btn-dragon;
+  }
+
+  .btn-earth {
+    @apply btn-fresh;
+  }
+
+  /* Product Card Hover */
+  .product-card {
+    @apply glass-card p-4 transition-all duration-300;
+  }
+  
+  .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 16px 40px hsl(var(--glass-shadow));
+  }
+
+  /* Scroll Reveal Animation */
+  .reveal {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Hero Text Animation */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(40px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.8s ease forwards;
+  }
+
+  .animation-delay-200 {
+    animation-delay: 0.2s;
+  }
+
+  .animation-delay-400 {
+    animation-delay: 0.4s;
+  }
+
+  .animation-delay-600 {
+    animation-delay: 0.6s;
+  }
+
+  /* Scrolling Text Animation */
+  @keyframes scroll-text {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .scroll-text {
+    animation: scroll-text 30s linear infinite;
+  }
+
+  @keyframes scroll-text-slow {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .scroll-text-slow {
+    animation: scroll-text-slow 60s linear infinite;
+  }
+
+  /* Price Tag - Dragon Pink */
+  .price-tag {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-bold;
+    background: var(--gradient-dragon);
+    color: white;
+  }
+
+  /* Category Badge - Fresh Green */
+  .category-badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium;
+    background: hsl(var(--secondary) / 0.15);
+    color: hsl(var(--secondary));
+  }
+
+  /* Section Container */
+  .section-container {
+    @apply container mx-auto px-4 py-16 md:py-24;
+  }
+
+  /* Hero Overlay - Dragon Fruit Theme */
+  .hero-overlay {
+    background: linear-gradient(
+      180deg,
+      hsl(140 60% 20% / 0.6) 0%,
+      hsl(330 80% 30% / 0.4) 50%,
+      hsl(150 30% 10% / 0.8) 100%
+    );
+  }
+
+  /* Video Background Overlay */
+  .video-overlay {
+    background: linear-gradient(
+      180deg,
+      hsl(140 60% 15% / 0.7) 0%,
+      hsl(330 80% 25% / 0.5) 40%,
+      hsl(140 60% 15% / 0.8) 100%
+    );
+  }
+}
+
+@layer utilities {
+  /* Custom Scrollbar */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.3) transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.3);
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.5);
+  }
+}

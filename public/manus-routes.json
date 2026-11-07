@@ -1,0 +1,468 @@
+{
+  "routes": [
+    {
+      "path": "/",
+      "title": "Home"
+    },
+    {
+      "path": "/:country",
+      "title": "country"
+    },
+    {
+      "path": "/:country/:region",
+      "title": "country \u00b7 region"
+    },
+    {
+      "path": "/:country/:region/:page",
+      "title": "country \u00b7 region \u00b7 page"
+    },
+    {
+      "path": "/about",
+      "title": "about"
+    },
+    {
+      "path": "/admin",
+      "title": "admin"
+    },
+    {
+      "path": "/admin/agri-intelligence",
+      "title": "admin \u00b7 agri-intelligence"
+    },
+    {
+      "path": "/admin/ai",
+      "title": "admin \u00b7 ai"
+    },
+    {
+      "path": "/admin/ai-agents",
+      "title": "admin \u00b7 ai-agents"
+    },
+    {
+      "path": "/admin/ai-config",
+      "title": "admin \u00b7 ai-config"
+    },
+    {
+      "path": "/admin/ai-control",
+      "title": "admin \u00b7 ai-control"
+    },
+    {
+      "path": "/admin/ai-diagnostics",
+      "title": "admin \u00b7 ai-diagnostics"
+    },
+    {
+      "path": "/admin/ai-images",
+      "title": "admin \u00b7 ai-images"
+    },
+    {
+      "path": "/admin/ai-providers",
+      "title": "admin \u00b7 ai-providers"
+    },
+    {
+      "path": "/admin/analytics",
+      "title": "admin \u00b7 analytics"
+    },
+    {
+      "path": "/admin/api-integrations",
+      "title": "admin \u00b7 api-integrations"
+    },
+    {
+      "path": "/admin/api-vault",
+      "title": "admin \u00b7 api-vault"
+    },
+    {
+      "path": "/admin/blog-posts",
+      "title": "admin \u00b7 blog-posts"
+    },
+    {
+      "path": "/admin/bulk-import",
+      "title": "admin \u00b7 bulk-import"
+    },
+    {
+      "path": "/admin/business-listings",
+      "title": "admin \u00b7 business-listings"
+    },
+    {
+      "path": "/admin/catalogue",
+      "title": "admin \u00b7 catalogue"
+    },
+    {
+      "path": "/admin/categories",
+      "title": "admin \u00b7 categories"
+    },
+    {
+      "path": "/admin/chat-settings",
+      "title": "admin \u00b7 chat-settings"
+    },
+    {
+      "path": "/admin/code-audit",
+      "title": "admin \u00b7 code-audit"
+    },
+    {
+      "path": "/admin/customers",
+      "title": "admin \u00b7 customers"
+    },
+    {
+      "path": "/admin/distributors",
+      "title": "admin \u00b7 distributors"
+    },
+    {
+      "path": "/admin/enquiries",
+      "title": "admin \u00b7 enquiries"
+    },
+    {
+      "path": "/admin/geo-content",
+      "title": "admin \u00b7 geo-content"
+    },
+    {
+      "path": "/admin/knowledge-base",
+      "title": "admin \u00b7 knowledge-base"
+    },
+    {
+      "path": "/admin/menus",
+      "title": "admin \u00b7 menus"
+    },
+    {
+      "path": "/admin/orders",
+      "title": "admin \u00b7 orders"
+    },
+    {
+      "path": "/admin/pages",
+      "title": "admin \u00b7 pages"
+    },
+    {
+      "path": "/admin/product-audit",
+      "title": "admin \u00b7 product-audit"
+    },
+    {
+      "path": "/admin/product-images",
+      "title": "admin \u00b7 product-images"
+    },
+    {
+      "path": "/admin/products",
+      "title": "admin \u00b7 products"
+    },
+    {
+      "path": "/admin/promo-codes",
+      "title": "admin \u00b7 promo-codes"
+    },
+    {
+      "path": "/admin/quotations",
+      "title": "admin \u00b7 quotations"
+    },
+    {
+      "path": "/admin/robots-audit",
+      "title": "admin \u00b7 robots-audit"
+    },
+    {
+      "path": "/admin/seo",
+      "title": "admin \u00b7 seo"
+    },
+    {
+      "path": "/admin/seo-validator",
+      "title": "admin \u00b7 seo-validator"
+    },
+    {
+      "path": "/admin/settings",
+      "title": "admin \u00b7 settings"
+    },
+    {
+      "path": "/admin/shipping-rates",
+      "title": "admin \u00b7 shipping-rates"
+    },
+    {
+      "path": "/admin/sitemap",
+      "title": "admin \u00b7 sitemap"
+    },
+    {
+      "path": "/admin/social-inbox",
+      "title": "admin \u00b7 social-inbox"
+    },
+    {
+      "path": "/admin/social-publisher",
+      "title": "admin \u00b7 social-publisher"
+    },
+    {
+      "path": "/admin/subscriptions",
+      "title": "admin \u00b7 subscriptions"
+    },
+    {
+      "path": "/admin/webhooks",
+      "title": "admin \u00b7 webhooks"
+    },
+    {
+      "path": "/admin/whatsapp",
+      "title": "admin \u00b7 whatsapp"
+    },
+    {
+      "path": "/africa",
+      "title": "africa"
+    },
+    {
+      "path": "/africa-fruit-and-vegetable-markets",
+      "title": "africa-fruit-and-vegetable-markets"
+    },
+    {
+      "path": "/africa/:country",
+      "title": "africa \u00b7 country"
+    },
+    {
+      "path": "/association",
+      "title": "association"
+    },
+    {
+      "path": "/blog",
+      "title": "blog"
+    },
+    {
+      "path": "/blog/:slug",
+      "title": "blog \u00b7 slug"
+    },
+    {
+      "path": "/business-resources",
+      "title": "business-resources"
+    },
+    {
+      "path": "/category/:slug",
+      "title": "category \u00b7 slug"
+    },
+    {
+      "path": "/checkout",
+      "title": "checkout"
+    },
+    {
+      "path": "/community-guidelines",
+      "title": "community-guidelines"
+    },
+    {
+      "path": "/consultations",
+      "title": "consultations"
+    },
+    {
+      "path": "/contact",
+      "title": "contact"
+    },
+    {
+      "path": "/cookie-policy",
+      "title": "cookie-policy"
+    },
+    {
+      "path": "/copyright-policy",
+      "title": "copyright-policy"
+    },
+    {
+      "path": "/countries",
+      "title": "countries"
+    },
+    {
+      "path": "/country",
+      "title": "country"
+    },
+    {
+      "path": "/country/:country",
+      "title": "country \u00b7 country"
+    },
+    {
+      "path": "/country/:country/:page",
+      "title": "country \u00b7 country \u00b7 page"
+    },
+    {
+      "path": "/country/:country/:region",
+      "title": "country \u00b7 country \u00b7 region"
+    },
+    {
+      "path": "/country/:country/:region/:page",
+      "title": "country \u00b7 country \u00b7 region \u00b7 page"
+    },
+    {
+      "path": "/country/:country/about",
+      "title": "country \u00b7 country \u00b7 about"
+    },
+    {
+      "path": "/country/:country/association",
+      "title": "country \u00b7 country \u00b7 association"
+    },
+    {
+      "path": "/country/:country/terms",
+      "title": "country \u00b7 country \u00b7 terms"
+    },
+    {
+      "path": "/country/:country/terms-and-services",
+      "title": "country \u00b7 country \u00b7 terms-and-services"
+    },
+    {
+      "path": "/data-deletion",
+      "title": "data-deletion"
+    },
+    {
+      "path": "/directory",
+      "title": "directory"
+    },
+    {
+      "path": "/directory/:slug",
+      "title": "directory \u00b7 slug"
+    },
+    {
+      "path": "/directory/register",
+      "title": "directory \u00b7 register"
+    },
+    {
+      "path": "/distributors",
+      "title": "Dragon Fruit Distributors"
+    },
+    {
+      "path": "/distributors/botswana",
+      "title": "Botswana Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/drc",
+      "title": "Drc Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/eswatini",
+      "title": "Eswatini Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/lesotho",
+      "title": "Lesotho Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/namibia",
+      "title": "Namibia Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/south-africa",
+      "title": "South Africa Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/zambia",
+      "title": "Zambia Dragon Fruit Distribution"
+    },
+    {
+      "path": "/distributors/zimbabwe",
+      "title": "Zimbabwe Authorised Dragon Fruit Distributors"
+    },
+    {
+      "path": "/draco",
+      "title": "DRACO Pro Agronomist"
+    },
+    {
+      "path": "/dragon-fruit-botswana",
+      "title": "dragon-fruit-botswana"
+    },
+    {
+      "path": "/dragon-fruit-carbon-and-radiation-claims",
+      "title": "dragon-fruit-carbon-and-radiation-claims"
+    },
+    {
+      "path": "/dragon-fruit-environmental-benefits",
+      "title": "dragon-fruit-environmental-benefits"
+    },
+    {
+      "path": "/dragon-fruit-global-production",
+      "title": "dragon-fruit-global-production"
+    },
+    {
+      "path": "/dragon-fruit-industry-growth",
+      "title": "dragon-fruit-industry-growth"
+    },
+    {
+      "path": "/dragon-fruit-namibia",
+      "title": "dragon-fruit-namibia"
+    },
+    {
+      "path": "/dragon-fruit-research-benefits",
+      "title": "dragon-fruit-research-benefits"
+    },
+    {
+      "path": "/dragon-fruit-zimbabwe",
+      "title": "dragon-fruit-zimbabwe"
+    },
+    {
+      "path": "/education",
+      "title": "education"
+    },
+    {
+      "path": "/education/1-hectare-dragon-fruit-farm-cost",
+      "title": "education \u00b7 1-hectare-dragon-fruit-farm-cost"
+    },
+    {
+      "path": "/education/commercial-orders",
+      "title": "education \u00b7 commercial-orders"
+    },
+    {
+      "path": "/history-of-dragon-fruit",
+      "title": "history-of-dragon-fruit"
+    },
+    {
+      "path": "/largest-dragon-fruit-record",
+      "title": "largest-dragon-fruit-record"
+    },
+    {
+      "path": "/login",
+      "title": "login"
+    },
+    {
+      "path": "/my-orders",
+      "title": "my-orders"
+    },
+    {
+      "path": "/order-success",
+      "title": "order-success"
+    },
+    {
+      "path": "/page/:slug",
+      "title": "page \u00b7 slug"
+    },
+    {
+      "path": "/privacy-policy",
+      "title": "privacy-policy"
+    },
+    {
+      "path": "/product/:slug",
+      "title": "product \u00b7 slug"
+    },
+    {
+      "path": "/products",
+      "title": "products"
+    },
+    {
+      "path": "/reset-password",
+      "title": "reset-password"
+    },
+    {
+      "path": "/rooting-services",
+      "title": "rooting-services"
+    },
+    {
+      "path": "/settings/integrations",
+      "title": "settings \u00b7 integrations"
+    },
+    {
+      "path": "/settings/integrations/tiktok",
+      "title": "settings \u00b7 integrations \u00b7 tiktok"
+    },
+    {
+      "path": "/settings/integrations/tiktok/error",
+      "title": "settings \u00b7 integrations \u00b7 tiktok \u00b7 error"
+    },
+    {
+      "path": "/settings/integrations/tiktok/success",
+      "title": "settings \u00b7 integrations \u00b7 tiktok \u00b7 success"
+    },
+    {
+      "path": "/signup",
+      "title": "signup"
+    },
+    {
+      "path": "/terms",
+      "title": "terms"
+    },
+    {
+      "path": "/terms-and-services",
+      "title": "terms-and-services"
+    },
+    {
+      "path": "/terms-of-service",
+      "title": "terms-of-service"
+    }
+  ]
+}

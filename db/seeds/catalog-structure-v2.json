@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "description": "Dragon Fruit Africa catalog structure requested on 2026-10-19. This manifest documents the managed-database catalog replacement; it is not auto-applied during deployment.",
+  "categories": [
+    {"name": "Dragon Fruit Nursery & Cultivars", "slug": "dragon-fruit-nursery-cultivars", "sort_order": 0},
+    {"name": "Live Algae Cultures & Projects", "slug": "live-algae-cultures-projects", "sort_order": 1},
+    {"name": "Fermentation Cultures & Equipment", "slug": "fermentation-cultures-equipment", "sort_order": 2},
+    {"name": "Organic Soil, Pond & Plant Health", "slug": "organic-soil-pond-plant-health", "sort_order": 3},
+    {"name": "Natural Ingredients & Growing Supplies", "slug": "natural-ingredients-growing-supplies", "sort_order": 4},
+    {"name": "Commercial Farming Services & Resources", "slug": "commercial-farming-services-resources", "sort_order": 5},
+    {"name": "Commercial Food Supplies", "slug": "commercial-food-supplies", "sort_order": 6},
+    {"name": "International Plant Import Services", "slug": "international-plant-import-services", "sort_order": 7}
+  ],
+  "service_product": {
+    "sku": "PLANT-IMPORT-FACILITATION-2500",
+    "name": "Complete Plant Import Facilitation & Permit Application",
+    "slug": "complete-plant-import-facilitation-permit-application",
+    "category_slug": "international-plant-import-services",
+    "price_zar": 2500,
+    "short_description": "Professional South African live-plant import facilitation and DALRRD permit application support. Starts at R2,500.",
+    "description": "Importing live plants into South Africa requires strict adherence to the Agricultural Pests Act and the Department of Agriculture, Land Reform and Rural Development (DALRRD). We take the stress out of international plant sourcing by handling the bureaucratic paperwork for you.\n\nOur Facilitation Service Includes:\n\nPreliminary consultation to check if your desired plant species is permitted for import into South Africa.\n\nPreparation and submission of the DALRRD Plant Import Permit application on your behalf.\n\nPayment of the standard DALRRD government permit application fee.\n\nGuidance on the exact Phytosanitary Certificate requirements you need to give to your international supplier.\n\nStep-by-step advice on the customs clearance and quarantine process to ensure your plants are not destroyed at the border.\n\nTerms and Conditions\n\nBase Fee Scope: The R2,500 starting fee covers standard administrative facilitation and the basic government permit application fee. Complex imports requiring post-entry quarantine facility arrangements may incur additional consulting fees.\n\nThird-Party Costs Excluded: This fee does not include international shipping, customs clearing agent fees, port health inspection fees, duties, or physical quarantine facility fees. These remain the responsibility of the importer.\n\nGovernment Authority: While we ensure your application is 100% compliant, the final decision to issue an import permit rests solely with DALRRD. We cannot guarantee permit approval for restricted species.\n\nInformation Accuracy: The client is responsible for providing the exact botanical names, quantities, and registered supplier details. Any amendments required due to client error will incur government amendment fees (currently R410).\n\nRefund Policy: Due to the administrative nature of this service, fees are non-refundable once the application has been drafted and submitted to the government department."
+  }
+}
