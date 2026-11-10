@@ -80,6 +80,7 @@ interface ProductForm {
   image_metadata: ImageUploadMetadata[];
   status: 'draft' | 'published';
   is_featured: boolean;
+  is_special_of_month: boolean;
   promo_start_date: string;
   promo_end_date: string;
   variants: ProductVariantForm[];
@@ -115,6 +116,7 @@ interface ProductRow {
   image_metadata?: ImageUploadMetadata[] | null;
   is_active: boolean;
   is_featured?: boolean;
+  is_special_of_month?: boolean;
   promo_start_date?: string | null;
   promo_end_date?: string | null;
 }
@@ -128,6 +130,7 @@ const emptyForm: ProductForm = {
   meta_title: '', meta_description: '',
   primary_image_url: '', images: [], image_alt_texts: [], image_metadata: [],
   status: 'draft', is_featured: false, promo_start_date: '', promo_end_date: '',
+  is_special_of_month: false,
   variants: [],
 };
 
@@ -203,6 +206,10 @@ export default function AdminProducts() {
   const missingShipping = (p: ProductRow) =>
     p.weight_kg == null || p.weight_kg <= 0 || p.length_cm == null || p.width_cm == null || p.height_cm == null ||
     p.length_cm <= 0 || p.width_cm <= 0 || p.height_cm <= 0;
+
+  // Specials of the Month: max 10 products at a time (excluding the one being edited).
+  const specialCount = (products || []).filter((p) => p.is_special_of_month && p.id !== editingId).length;
+  const specialFull = specialCount >= 10;
 
   const filteredProducts = useMemo(() => (products || []).filter((p) => {
     if (listFilter === 'published' && !p.is_active) return false;
@@ -349,6 +356,7 @@ export default function AdminProducts() {
         image_metadata: data.image_metadata,
         is_active: data.status === 'published',
         is_featured: data.is_featured,
+        is_special_of_month: data.is_special_of_month,
         promo_start_date: data.promo_start_date || null,
         promo_end_date: data.promo_end_date || null,
       };
@@ -530,6 +538,7 @@ export default function AdminProducts() {
       image_metadata: Array.isArray(product.image_metadata) ? product.image_metadata : [],
       status: product.is_active ? 'published' : 'draft',
       is_featured: product.is_featured ?? false,
+      is_special_of_month: product.is_special_of_month ? true : false,
       promo_start_date: product.promo_start_date ? new Date(product.promo_start_date).toISOString().slice(0, 16) : '',
       promo_end_date: product.promo_end_date ? new Date(product.promo_end_date).toISOString().slice(0, 16) : '',
       variants: [],
@@ -615,6 +624,7 @@ export default function AdminProducts() {
       image_alt_texts: (p.image_alt_texts || []).join('|'),
       status: p.is_active ? 'published' : 'draft',
       is_featured: p.is_featured ? 'yes' : 'no',
+      is_special_of_month: p.is_special_of_month ? 'yes' : 'no',
     }));
     const csv = Papa.unparse(rows);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -629,6 +639,7 @@ export default function AdminProducts() {
   const importCsv = async () => {
     if (!csvRows.length) { toast.error('Choose a CSV file first'); return; }
     let created = 0, updated = 0, failed = 0;
+    let specialCount = (products || []).filter((p) => p.is_special_of_month).length;
     const takenSlugs = new Set((products || []).map((p) => p.slug));
     const takenSkus = new Set((products || []).map((p) => p.sku));
     for (const r of csvRows) {
@@ -664,7 +675,9 @@ export default function AdminProducts() {
           image_alt_texts: alts.some(Boolean) ? images.map((_, i) => alts[i] || '') : null,
           is_active: (r.status || 'draft') === 'published',
           is_featured: (r.is_featured || '').toLowerCase() === 'yes',
+          is_special_of_month: (r.is_special_of_month || '').toLowerCase() === 'yes' && specialCount < 10,
         };
+        if (payload.is_special_of_month) specialCount++;
         const existing = (products || []).find((p) => p.sku === sku);
         if (existing) {
           const { error } = await appClient.from('products').update(payload).eq('id', existing.id);
@@ -971,8 +984,24 @@ export default function AdminProducts() {
                     <input type="checkbox" checked={form.is_featured} onChange={(e) => setForm({ ...form, is_featured: e.target.checked })} className="rounded" />
                     Featured on home page
                   </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.is_special_of_month}
+                      disabled={specialFull && !form.is_special_of_month}
+                      onChange={(e) => setForm({ ...form, is_special_of_month: e.target.checked })}
+                      className="rounded"
+                    />
+                    Show on Specials of the Month
+                  </label>
                 </div>
                 <p className="text-xs text-muted-foreground">Drafts are invisible to shoppers. Publishing requires shipping weight and dimensions.</p>
+                {specialFull && (
+                  <p className="text-xs text-destructive flex items-start gap-1">
+                    <TriangleAlert className="h-3 w-3 mt-0.5 shrink-0" />
+                    Maximum limit reached: 10 products are already selected for Specials of the Month. Unselect one before adding another.
+                  </p>
+                )}
                 <div className="p-4 rounded-lg border border-dashed border-primary/30 bg-primary/5 space-y-3">
                   <h4 className="text-sm font-medium text-primary">Promotional period (optional)</h4>
                   <div className="grid grid-cols-2 gap-4">

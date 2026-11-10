@@ -130,3 +130,19 @@ export function useProductsByCategory(categorySlug: string) {
     enabled: !!categorySlug,
   });
 }
+
+export function useSpecialProducts() {
+  return useQuery({
+    queryKey: ['products', 'special-of-month'],
+    queryFn: async (): Promise<Product[]> => {
+      const { data, error } = await appClient
+        .from('products')
+        .select('*')
+        .eq('is_active', true)
+        .eq('is_special_of_month', true)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return filterExpiredPromos(data || []);
+    },
+  });
+}

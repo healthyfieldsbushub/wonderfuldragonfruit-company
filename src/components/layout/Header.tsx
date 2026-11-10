@@ -51,6 +51,7 @@ export function Header() {
 
   const shopCategories = [
     { label: 'All Products', href: '/products' },
+    { label: 'Specials of the Month', href: '/specials-of-the-month' },
     ...dbCategories.map((cat) => ({
       label: cat.name,
       href: `/category/${getSeoSlug(cat.slug)}`,

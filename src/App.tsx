@@ -15,6 +15,7 @@ import { CookieConsentBanner } from "@/components/consent/CookieConsentBanner";
 const Index = lazy(() => import("./pages/Index"));
 const DracoPage = lazy(() => import("./pages/Draco"));
 const Products = lazy(() => import("./pages/Products"));
+const SpecialsOfTheMonth = lazy(() => import("./pages/Specials"));
 const CategoryPage = lazy(() => import("./pages/CategoryPage"));
 const ProductDetail = lazy(() => import("./pages/ProductDetail"));
 const Contact = lazy(() => import("./pages/Contact"));
@@ -172,6 +173,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/products" element={<Products />} />
+              <Route path="/specials-of-the-month" element={<SpecialsOfTheMonth />} />
               <Route path="/draco" element={<DracoPage />} />
               <Route path="/products/:slug" element={<ProductDetail />} />
               <Route path="/category/:slug" element={<CategoryPage />} />

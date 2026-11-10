@@ -43,6 +43,7 @@ export interface Product {
   business_identity: string | null;
   product_facts: Json | null;
   is_featured: boolean;
+  is_special_of_month: boolean;
   is_active: boolean;
   promo_start_date: string | null;
   promo_end_date: string | null;
