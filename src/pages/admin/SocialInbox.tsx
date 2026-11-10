@@ -307,9 +307,19 @@ export default function SocialInbox() {
                       </div>
                     ) : filteredContacts.length === 0 ? (
                       <div className="text-center py-8 text-muted-foreground">
-                        <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                        <p>No conversations yet</p>
-                        <p className="text-xs mt-1">Messages will appear when customers contact you</p>
+                        {platform.id === "whatsapp" ? (
+                          <>
+                            <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                            <p>No conversations yet</p>
+                            <p className="text-xs mt-1">Messages will appear when customers contact the business number</p>
+                          </>
+                        ) : (
+                          <>
+                            {platform.id === "facebook" ? <Facebook className="h-12 w-12 mx-auto mb-2 opacity-50" /> : <Instagram className="h-12 w-12 mx-auto mb-2 opacity-50" />}
+                            <p className="font-medium text-foreground">Not connected yet</p>
+                            <p className="text-xs mt-1">Facebook and Instagram messaging need the Meta page token configured in Secrets.</p>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-1 p-2">

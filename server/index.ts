@@ -1934,6 +1934,18 @@ async function handleFunction(name: string, body: Record<string, any>, req: Requ
     );
     return { success: true, orderId: donationId, orderNumber: donationOrderNumber };
   }
+  if (name === "social-send") {
+    // Admin Social Inbox reply. Only WhatsApp is connected; Meta page tokens for
+    // Facebook/Instagram DMs are not configured yet.
+    const platform = String(body.platform || "");
+    if (!["whatsapp"].includes(platform)) throw new Error(`${platform} is not connected yet - configure the Meta page token in Secrets to enable it`);
+    if (!(await hasAdminPasswordAccess(req))) throw new Error("Verified admin access is required to send messages from the business number");
+    const to = String(body.to || "").replace(/[^0-9]/g, "");
+    const messageText = String(body.message || "").trim();
+    if (!to || !messageText) throw new Error("A recipient number and message are required");
+    await sendWhatsAppText(to, messageText);
+    return { success: true, sentTo: to };
+  }
   if (name === "payfast-payment") return createPayFastCheckout(body);
   if (name === "send-email") {
     // Supports both the checkout order-confirmation flow and generic SMTP sends.
@@ -2244,7 +2256,7 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
       for (const change of changes) {
         const value = (change.value && typeof change.value === "object") ? change.value as Record<string, unknown> : {};
         const contacts = Array.isArray(value.contacts) ? value.contacts as Record<string, unknown>[] : [];
-        const profileName = contacts.length ? String((contacts[0].profile as Record<string, unknown> | undefined)?.wa_name || "") : "";
+        const profileName = contacts.length ? String((contacts[0].profile as Record<string, unknown> | undefined)?.name || (contacts[0].profile as Record<string, unknown> | undefined)?.wa_name || "") : "";
         // Inbound customer messages
         const messages = Array.isArray(value.messages) ? value.messages as Record<string, unknown>[] : [];
         for (const message of messages) {
@@ -2259,6 +2271,20 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             "INSERT INTO whatsapp_messages (id, wa_message_id, direction, from_number, to_number, message_type, message_content, status, raw_payload, created_at) VALUES (?, ?, 'inbound', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
             [crypto.randomUUID(), waId, String(message.from || ""), WHATSAPP_PHONE_NUMBER_ID, String(message.type || "unknown"), text ? String(text) : null, "received", JSON.stringify(message)],
           );
+          // Keep the admin Social Inbox contact list in sync with every conversation.
+          const contactWaId = String(message.from || "");
+          if (contactWaId) {
+            try {
+              const existing = await query<RowDataPacket[]>("SELECT id FROM whatsapp_contacts WHERE wa_id = ? LIMIT 1", [contactWaId]);
+              if (existing.length) {
+                await query("UPDATE whatsapp_contacts SET name = COALESCE(NULLIF(?, ''), name), phone_number = ?, updated_at = CURRENT_TIMESTAMP WHERE wa_id = ?", [profileName || "", contactWaId, contactWaId]);
+              } else {
+                await query("INSERT INTO whatsapp_contacts (id, wa_id, name, phone_number) VALUES (?, ?, ?, ?)", [crypto.randomUUID(), contactWaId, profileName || contactWaId, contactWaId]);
+              }
+            } catch (contactError) {
+              console.warn("WhatsApp contact upsert failed", contactError instanceof Error ? contactError.message : contactError);
+            }
+          }
           // Respond 200 to Meta immediately; process the AI reply asynchronously.
           if (text && String(message.from || "")) {
             const from = String(message.from);
