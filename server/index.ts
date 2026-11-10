@@ -186,6 +186,19 @@ async function dataHandler(req: Request, res: Response) {
     if (operation !== "select" && ADMIN_MUTATION_TABLES.has(tableName) && !(await hasAdminPasswordAccess(req))) {
       return res.status(401).json(apiError("Admin authentication is required for this database change", "ADMIN_AUTH_REQUIRED", 401));
     }
+    if (operation === "select" && ADMIN_READ_TABLES.has(tableName) && !(await hasAdminPasswordAccess(req))) {
+      if (tableName === "orders") {
+        const caller = verifiedIdentity(req);
+        if (caller?.id) {
+          // Force the read to the caller's own orders - client filters are not trusted.
+          body.filters = [...(body.filters || []).filter((f) => f.column !== "customer_id"), { column: "customer_id", operator: "eq", value: caller.id }];
+        } else {
+          return res.status(401).json(apiError("Sign in to view your orders, or use guest order lookup with your order number", "ADMIN_AUTH_REQUIRED", 401));
+        }
+      } else {
+        return res.status(401).json(apiError("Admin authentication is required to read this table", "ADMIN_AUTH_REQUIRED", 401));
+      }
+    }
     const where = whereClause(body.filters, body.or);
     if (operation === "select") {
       const select = columns(body.columns || "*");
@@ -290,6 +303,11 @@ const ADMIN_MUTATION_TABLES = new Set([
   "distributor_countries", "distributor_documents", "distributor_enquiries",
   "draco_subscriptions", "draco_usage_events",
 ]);
+
+// Tables whose rows contain customer data (emails, addresses, order history).
+// Reads are locked to admin sessions; for orders, logged-in customers may read
+// ONLY their own rows (server-enforced customer_id filter).
+const ADMIN_READ_TABLES = new Set(["orders", "customers", "users"]);
 
 function hasValidAdminPasswordSession(req: Request) {
   const token = req.cookies?.admin_panel_session as string | undefined;
@@ -1886,6 +1904,36 @@ async function createOrderFromCart(body: Record<string, any>) {
 }
 
 async function handleFunction(name: string, body: Record<string, any>, req: Request) {
+  if (name === "guest-order-lookup") {
+    // Guest order tracking: requires the order email PLUS the order number.
+    // Returns only non-sensitive status fields - never addresses or payment references.
+    const lookupEmail = String(body.email || "").trim().toLowerCase();
+    const lookupOrder = String(body.orderNumber || "").trim().toUpperCase();
+    if (!lookupEmail || !lookupOrder) throw new Error("Provide the email used at checkout and the order number");
+    const found = await query<RowDataPacket[]>(
+      "SELECT order_number, status, payment_status, total_zar, currency, shipping_method, tracking_number, shipped_at, delivered_at, created_at FROM orders WHERE order_number = ? AND LOWER(guest_email) = ? LIMIT 1",
+      [lookupOrder, lookupEmail],
+    );
+    const order = (found as RowDataPacket[])[0];
+    if (!order) throw new Error("No order found for that email and order number");
+    return { orders: [order] };
+  }
+  if (name === "donation-create") {
+    // Donations go through a strict server-side allowlist - anonymous clients
+    // can never insert arbitrary fields into orders.
+    const donationAmount = Number(body.amount);
+    if (!Number.isFinite(donationAmount) || donationAmount < 10 || donationAmount > 1000000) throw new Error("Donation amount must be between R10 and R1,000,000");
+    const donationEmail = String(body.email || "").trim().slice(0, 190);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(donationEmail)) throw new Error("A valid email address is required");
+    const donationName = String(body.name || "").trim().slice(0, 120);
+    const donationId = crypto.randomUUID();
+    const donationOrderNumber = `DON-${Date.now()}`;
+    await query<ResultSetHeader>(
+      "INSERT INTO orders (id, order_number, guest_email, subtotal_zar, total_zar, status, payment_status, notes, shipping_method) VALUES (?, ?, ?, ?, ?, 'pending', 'pending', ?, 'donation')",
+      [donationId, donationOrderNumber, donationEmail, donationAmount.toFixed(2), donationAmount.toFixed(2), `Donation from ${donationName || donationEmail}`],
+    );
+    return { success: true, orderId: donationId, orderNumber: donationOrderNumber };
+  }
   if (name === "payfast-payment") return createPayFastCheckout(body);
   if (name === "send-email") {
     // Supports both the checkout order-confirmation flow and generic SMTP sends.
@@ -2654,7 +2702,7 @@ const SEO_STATIC_ROUTES: Array<{ path: string; changefreq: string; priority: str
   { path: "/distributors/lesotho", changefreq: "monthly", priority: "0.6" },
   { path: "/products", changefreq: "daily", priority: "0.9" },
   { path: "/specials-of-the-month", changefreq: "weekly", priority: "0.9" },
-  { path: "/blog", changefreq: "daily", priority: "0.9" },
+  { path: "/blog/", changefreq: "daily", priority: "0.9" },
   { path: "/about", changefreq: "monthly", priority: "0.7" },
   { path: "/contact", changefreq: "monthly", priority: "0.8" },
   { path: "/consultations", changefreq: "monthly", priority: "0.8" },

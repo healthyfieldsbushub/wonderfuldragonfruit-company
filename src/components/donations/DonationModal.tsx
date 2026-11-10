@@ -47,27 +47,26 @@ export function DonationModal({ trigger, className }: DonationModalProps) {
 
     setLoading(true);
     try {
-      // Create a donation record
-      const donationId = crypto.randomUUID();
-      const { error: insertError } = await appClient
-        .from("orders")
-        .insert({
-          id: donationId,
-          order_number: `DON-${Date.now()}`,
-          guest_email: email,
-          subtotal_zar: effectiveAmount,
-          total_zar: effectiveAmount,
-          status: "pending",
-          payment_status: "pending",
-          notes: `Donation from ${name || email}`,
-          shipping_method: "donation",
-        });
+      // Create the donation record through the secure server function
+      // (anonymous clients can no longer write to orders directly).
+      const { data: donationData, error: donationError } = await appClient.functions.invoke<{
+        success?: boolean;
+        orderId?: string;
+        orderNumber?: string;
+      }>("donation-create", {
+        body: { amount: effectiveAmount, email, name: name || "" },
+      });
 
-      if (insertError) {
-        console.error("Failed to create donation record:", insertError);
+      if (donationError || !donationData?.success) {
+        console.error("Failed to create donation record:", donationError);
+        toast.error("Could not start the donation. Please try again.");
+        return;
       }
 
-      const returnUrl = `${window.location.origin}/order-success?order=DON-${Date.now()}&type=donation`;
+      const donationId = donationData.orderId as string;
+      const donationOrderNumber = donationData.orderNumber as string;
+
+      const returnUrl = `${window.location.origin}/order-success?order=${donationOrderNumber}&type=donation`;
       const cancelUrl = `${window.location.origin}`;
 
       let paymentResult;
