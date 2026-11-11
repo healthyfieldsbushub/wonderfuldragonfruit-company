@@ -2276,18 +2276,21 @@ const WHATSAPP_BRIDGE_URL = (process.env.WHATSAPP_BRIDGE_URL || "https://meta-so
 // Outbound WhatsApp. Preferred path is direct to Meta's Graph API; the Cloudflare
 // bridge is only a fallback for as long as no Meta token is stored.
 async function graphSendWhatsApp(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  if (!META_WHATSAPP_TOKEN) throw new Error("META_WHATSAPP_TOKEN is not configured");
+  // A dedicated WhatsApp token is preferred; the Meta Graph token that already
+  // carries whatsapp_business_messaging works just as well and avoids a second key.
+  const token = META_WHATSAPP_TOKEN || String(process.env.FACEBOOK_GRAPH_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "");
+  if (!token) throw new Error("No Meta token is available for WhatsApp sending");
   const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
   return externalJson(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${META_WHATSAPP_TOKEN}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ messaging_product: "whatsapp", ...payload }),
   });
 }
 
 async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
   const payload = { to: toNumber, type: "text", text: { body: text } };
-  if (META_WHATSAPP_TOKEN) {
+  if (META_WHATSAPP_TOKEN || process.env.FACEBOOK_GRAPH_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN) {
     try {
       await graphSendWhatsApp(payload);
       return;
@@ -2675,7 +2678,7 @@ app.get("/api/admin/meta/status", async (req, res) => {
         instagramId: Boolean(process.env.INSTAGRAM_ID),
         graphToken: Boolean(process.env.FACEBOOK_GRAPH_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN),
         appSecret: Boolean(META_APP_SECRET),
-        whatsappDirect: Boolean(META_WHATSAPP_TOKEN),
+        whatsappDirect: Boolean(META_WHATSAPP_TOKEN || process.env.FACEBOOK_GRAPH_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN),
         whatsappBridgeFallback: Boolean(process.env.WHATSAPP_SITE_KEY),
         webhookVerifyToken: Boolean(META_WEBHOOK_VERIFY_TOKEN),
         whatsappWebhook: "https://wonderfuldragonfruit.company/api/webhooks/whatsapp",
