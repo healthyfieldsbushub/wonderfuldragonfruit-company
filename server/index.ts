@@ -2288,24 +2288,53 @@ async function graphSendWhatsApp(payload: Record<string, unknown>): Promise<Reco
   });
 }
 
+// The central Cloudflare Worker is the preferred outbound path; it holds the
+// WhatsApp token and maps every number to its site. Direct Graph API is the fallback.
+async function bridgeSendWhatsAppText(toNumber: string, text: string): Promise<void> {
+  const siteKey = process.env.WHATSAPP_SITE_KEY;
+  if (!siteKey) throw new Error("WHATSAPP_SITE_KEY is not configured");
+  await externalJson(`${WHATSAPP_BRIDGE_URL}/api/whatsapp/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-whatsapp-site-key": siteKey },
+    // The Worker API requires phone_number_id, to and message.
+    body: JSON.stringify({ phone_number_id: WHATSAPP_PHONE_NUMBER_ID, to: toNumber, message: text }),
+  });
+}
+async function bridgeSendWhatsAppTemplate(toNumber: string, templateName: string, languageCode: string, bodyParams: string[]): Promise<void> {
+  const siteKey = process.env.WHATSAPP_SITE_KEY;
+  if (!siteKey) throw new Error("WHATSAPP_SITE_KEY is not configured");
+  const components = bodyParams.length ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] : [];
+  const result = await externalJson<{ result?: { error?: { message?: string } }; error?: { message?: string } }>(`${WHATSAPP_BRIDGE_URL}/mcp`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "x-whatsapp-site-key": siteKey,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "whatsapp_send_template",
+        arguments: { phone_number_id: WHATSAPP_PHONE_NUMBER_ID, to: toNumber, template_name: templateName, language: languageCode, components },
+      },
+    }),
+  });
+  const failure = result?.result?.error?.message || result?.error?.message;
+  if (failure) throw new Error(failure);
+}
 async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
-  const payload = { to: toNumber, type: "text", text: { body: text } };
-  if (META_WHATSAPP_TOKEN || process.env.FACEBOOK_GRAPH_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN) {
+  if (process.env.WHATSAPP_SITE_KEY) {
     try {
-      await graphSendWhatsApp(payload);
+      await bridgeSendWhatsAppText(toNumber, text);
       return;
     } catch (error) {
-      console.error("WhatsApp direct send failed, falling back to bridge", error instanceof Error ? error.message : error);
+      console.error("WhatsApp bridge send failed, trying Meta directly", error instanceof Error ? error.message : error);
     }
   }
-  const siteKey = process.env.WHATSAPP_SITE_KEY;
-  if (!siteKey) return;
   try {
-    await externalJson(`${WHATSAPP_BRIDGE_URL}/api/whatsapp/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-whatsapp-site-key": siteKey },
-      body: JSON.stringify({ number: WHATSAPP_SITE_NUMBER, payload: { messaging_product: "whatsapp", ...payload } }),
-    });
+    await graphSendWhatsApp({ to: toNumber, type: "text", text: { body: text } });
   } catch (error) {
     console.error("WhatsApp outbound send failed", error instanceof Error ? error.message : error);
   }
@@ -2314,7 +2343,13 @@ async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
 // Template send for messaging outside the 24-hour customer-service window.
 async function sendWhatsAppTemplate(toNumber: string, templateName: string, languageCode = "en", bodyParams: string[] = []): Promise<void> {
   const components = bodyParams.length ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] : [];
-  await graphSendWhatsApp({ to: toNumber, type: "template", template: { name: templateName, language: { code: languageCode }, components } });
+  try {
+    await graphSendWhatsApp({ to: toNumber, type: "template", template: { name: templateName, language: { code: languageCode }, components } });
+    return;
+  } catch (error) {
+    console.error("WhatsApp template send via Meta failed, falling back to bridge", error instanceof Error ? error.message : error);
+  }
+  await bridgeSendWhatsAppTemplate(toNumber, templateName, languageCode, bodyParams);
 }
 
 // WhatsApp Business Hours: only auto-reply between 07:00 and 17:00 SAST (UTC+2).
