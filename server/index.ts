@@ -15,7 +15,14 @@ import {
   cancelInvoice,
   updateInvoice,
   invoiceToPdfInput,
+  logInvoiceEvent,
 } from "./invoices";
+import {
+  sendDocumentEmail,
+  sendDocumentWhatsApp,
+  documentEmailBody,
+  type DeliveryResult,
+} from "./documentDelivery";
 import sharp from "sharp";
 import { configureOneMin, isOneMinConfigured, refreshModelCatalog, listCachedModels, getTaskAssignments, updateTaskAssignment, usageSummary, chatForTask, generateImage, getSettings, setSetting } from "./onemin";
 
@@ -3903,6 +3910,188 @@ app.get("/api/admin/quotations/:id/pdf", async (req, res) => {
   }
 });
 
+
+// ------------------- Document delivery (email + WhatsApp) -------------------
+// The PDF is rendered on demand. WhatsApp needs a URL Meta can fetch, so a
+// short-lived HMAC-signed link is issued instead of exposing customer documents
+// on a permanent public path.
+
+const DOCUMENT_URL_TTL_MINUTES = 60;
+
+function documentUrlSecret() {
+  return process.env.DOCUMENT_URL_SECRET || process.env.MANUS_JWT_SECRET || "";
+}
+
+function signDocumentToken(kind: string, id: string, expiresAt: number) {
+  const secret = documentUrlSecret();
+  if (!secret) return "";
+  return crypto.createHmac("sha256", secret).update(`${kind}:${id}:${expiresAt}`).digest("hex");
+}
+
+function buildDocumentUrl(kind: "invoice" | "quotation", id: string, baseUrl: string) {
+  const expiresAt = Date.now() + DOCUMENT_URL_TTL_MINUTES * 60_000;
+  const token = signDocumentToken(kind, id, expiresAt);
+  return `${baseUrl}/api/documents/${kind}/${id}.pdf?expires=${expiresAt}&token=${token}`;
+}
+
+/** Renders the PDF for an invoice or quotation. Shared by download and delivery. */
+async function renderStoredDocument(kind: "invoice" | "quotation", id: string) {
+  if (kind === "invoice") {
+    const record = await getInvoice(query, id);
+    if (!record) return null;
+    return {
+      number: String(record.invoice.invoice_number),
+      filename: `${record.invoice.invoice_number}.pdf`,
+      contactName: String(record.invoice.contact_name || "Customer"),
+      email: String(record.invoice.email || ""),
+      whatsapp: String(record.invoice.whatsapp || ""),
+      total: `R ${Number(record.invoice.total_zar).toFixed(2)}`,
+      dueDate: record.invoice.due_date ? String(record.invoice.due_date).slice(0, 10) : null,
+      pdf: await renderDocumentPdf(invoiceToPdfInput(record.invoice, record.items)),
+    };
+  }
+  const quotations = await query<RowDataPacket[]>("SELECT * FROM quotations WHERE id = ?", [id]);
+  if (!quotations.length) return null;
+  const items = await query<RowDataPacket[]>(
+    "SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY created_at",
+    [id],
+  );
+  const quotation = quotations[0];
+  return {
+    number: String(quotation.quotation_number),
+    filename: `${quotation.quotation_number}.pdf`,
+    contactName: String(quotation.customer_name || "Customer"),
+    email: String(quotation.email || ""),
+    whatsapp: String(quotation.phone || ""),
+    total: `R ${Number(quotation.total_zar).toFixed(2)}`,
+    dueDate: null,
+    pdf: await renderDocumentPdf({
+      documentTitle: "Quotation",
+      documentNumber: String(quotation.quotation_number),
+      documentDate: String(quotation.created_at).slice(0, 10),
+      dueDate: null,
+      contactName: String(quotation.customer_name || "Customer"),
+      companyName: quotation.company_name || null,
+      email: quotation.email || null,
+      whatsapp: quotation.phone || null,
+      billingAddress: quotation.billing_address || null,
+      items: items.map((item) => ({
+        productName: String(item.product_name),
+        description: null,
+        sku: item.product_sku || null,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unit_price_zar),
+        discount: 0,
+        total: Number(item.total_price_zar),
+      })),
+      subtotal: Number(quotation.subtotal_zar),
+      discount: 0,
+      vatEnabled: Boolean(quotation.vat_enabled),
+      vatRate: 15,
+      vat: Number(quotation.vat_zar),
+      total: Number(quotation.total_zar),
+      paymentTerms: "Quotation valid for 14 days.",
+      notes: quotation.notes || null,
+    }),
+  };
+}
+
+// Public, signed, expiring download used by Meta to fetch the document.
+app.get("/api/documents/:kind/:id.pdf", async (req, res) => {
+  try {
+    const kind = String(req.params.kind);
+    if (kind !== "invoice" && kind !== "quotation") {
+      return res.status(404).json({ error: "Unknown document type" });
+    }
+    const id = String(req.params.id);
+    const expiresAt = Number(req.query.expires);
+    const token = String(req.query.token || "");
+    if (!expiresAt || !token) return res.status(403).json({ error: "A signed link is required" });
+    if (Date.now() > expiresAt) return res.status(403).json({ error: "This document link has expired" });
+    const expected = signDocumentToken(kind, id, expiresAt);
+    const ok =
+      expected.length === token.length &&
+      crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token));
+    if (!ok) return res.status(403).json({ error: "This document link is not valid" });
+
+    const document = await renderStoredDocument(kind, id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${document.filename}"`);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(document.pdf);
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to render document" });
+  }
+});
+
+/** Delivers an invoice or quotation over the requested channels. */
+async function deliverDocument(req: Request, res: Response, kind: "invoice" | "quotation") {
+  if (!(await hasAdminPasswordAccess(req))) {
+    return res.status(401).json({ error: "Admin authentication required" });
+  }
+  try {
+    const id = String(req.params.id);
+    const body = (req.body || {}) as Record<string, unknown>;
+    const channels = (Array.isArray(body.channels) ? body.channels : ["email"]).map((c) => String(c));
+    const document = await renderStoredDocument(kind, id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+
+    const emailTo = String(body.email || document.email || "").trim();
+    const whatsappTo = String(body.whatsapp || document.whatsapp || "").trim();
+    const baseUrl = String(body.baseUrl || `https://${req.hostname === "localhost" ? "wonderfuldragonfruit.company" : req.hostname}`);
+    const results: DeliveryResult[] = [];
+
+    if (channels.includes("email")) {
+      const mail = documentEmailBody(kind, {
+        documentNumber: document.number,
+        contactName: document.contactName,
+        total: document.total,
+        dueDate: document.dueDate,
+      });
+      results.push(
+        await sendDocumentEmail({
+          to: emailTo,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          attachment: { filename: document.filename, content: document.pdf, contentType: "application/pdf" },
+        }),
+      );
+    }
+
+    if (channels.includes("whatsapp")) {
+      const pdfUrl = buildDocumentUrl(kind, id, baseUrl);
+      results.push(
+        await sendDocumentWhatsApp({
+          to: whatsappTo,
+          pdfUrl,
+          filename: document.filename,
+          caption: `${kind === "invoice" ? "Invoice" : "Quotation"} ${document.number} — ${document.total}`,
+        }),
+      );
+    }
+
+    if (kind === "invoice") {
+      for (const result of results) {
+        await logInvoiceEvent(query, id, result.ok ? "sent" : "send_failed", {
+          channel: result.channel,
+          recipient: result.channel === "email" ? emailTo : whatsappTo,
+          status: result.ok ? "sent" : "failed",
+          detail: result.detail,
+        });
+      }
+    }
+
+    const anyOk = results.some((r) => r.ok);
+    return res.status(anyOk ? 200 : 502).json({ documentNumber: document.number, results });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to deliver document" });
+  }
+}
+
+app.post("/api/admin/invoices/:id/send", async (req, res) => deliverDocument(req, res, "invoice"));
+app.post("/api/admin/quotations/:id/send", async (req, res) => deliverDocument(req, res, "quotation"));
 
 app.use(express.static(path.join(root, "dist")));
 // Per-route SEO rendering: the built index.html carries the homepage's title/

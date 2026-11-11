@@ -12,7 +12,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "feed": "tsx scripts/generate-product-feed.ts"
+    "feed": "tsx scripts/generate-product-feed.ts",
+    "check:server": "node scripts/check-server-structure.mjs",
+    "check": "npm run check:server"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.11",

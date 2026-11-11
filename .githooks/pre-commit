@@ -1,0 +1,11 @@
+#!/bin/sh
+# Blocks commits that would introduce the "swallowed route" class of fault:
+# a route registration nested inside another route handler, plus any syntax
+# error in server/*.ts. See scripts/check-server-structure.mjs for background.
+echo "[pre-commit] checking server structure..."
+node scripts/check-server-structure.mjs || {
+  echo ""
+  echo "[pre-commit] BLOCKED: fix the server structure problems above."
+  echo "[pre-commit] Bypass only with: git commit --no-verify"
+  exit 1
+}
