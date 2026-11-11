@@ -1919,41 +1919,107 @@ async function fetchShippingRates(body: Record<string, any>) {
   return { rates, notices, chargeableKg, volumetricKg };
 }
 
-async function fetchPudoLockers(postalCode: string) {
+type PudoLocker = {
+  id: string;
+  name: string;
+  address: string;
+  postalCode: string;
+  town: string;
+  province: string;
+  type: string;
+  provider: string;
+  status: string;
+  latitude: string;
+  longitude: string;
+  boxSizes: string[];
+};
+
+// The national point list is ~6 MB and changes slowly, so it is cached in
+// memory instead of being re-downloaded on every checkout keystroke.
+let pudoLockerCache: { at: number; data: PudoLocker[] } | null = null;
+const PUDO_LOCKER_TTL_MS = 60 * 60 * 1000;
+
+function normalizePudoLocker(locker: Record<string, any>): PudoLocker {
+  const place = (locker.place || {}) as Record<string, unknown>;
+  const detailed = (locker.detailed_address || {}) as Record<string, unknown>;
+  const type = (locker.type || {}) as Record<string, unknown>;
+  const boxes = Array.isArray(locker.lstTypesBoxes) ? locker.lstTypesBoxes : [];
+  return {
+    id: String(locker.code || locker.id || ""),
+    name: String(locker.name || locker.label || "PUDO locker"),
+    address: String(locker.address || detailed.formatted_address || ""),
+    // The provider nests the postal code under `place`. Reading it from the top
+    // level (as this code previously did) never matched, so every postal-code
+    // lookup returned zero lockers even though the listing itself was healthy.
+    postalCode: String(place.postalCode || detailed.postal_code || locker.postalCode || locker.postal_code || ""),
+    town: String(place.town || detailed.locality || ""),
+    province: String(detailed.province || ""),
+    type: String(type.name || "Locker"),
+    provider: String(locker.provider || ""),
+    status: String(locker.status || ""),
+    latitude: String(locker.latitude || ""),
+    longitude: String(locker.longitude || ""),
+    boxSizes: boxes.map((box: Record<string, unknown>) => String(box.name || "")).filter(Boolean),
+  };
+}
+
+async function loadPudoLockers(): Promise<PudoLocker[]> {
+  if (pudoLockerCache && Date.now() - pudoLockerCache.at < PUDO_LOCKER_TTL_MS) return pudoLockerCache.data;
   const pudoKey = process.env.PUDO_GENERIC_API_KEY || process.env.PUDO_API_KEY || process.env.PUDO_SHIPPING_API;
   if (!pudoKey) return [];
   // Locker listings are served by the PUDO host; the TCG host 500s on this route.
   const pudoBase = (process.env.PUDO_LOCKERS_API_URL || process.env.PUDO_API_URL || "https://api-pudo.co.za").replace(/\/$/, "");
   const lockerPath = pudoBase.includes("shiplogic.com") ? "/pickup-points?type=locker" : "/api/v1/lockers-data";
-  let result: Record<string, unknown>;
+  let result: unknown;
   try {
     result = await externalJson(`${pudoBase}${lockerPath}`, { headers: { Authorization: `Bearer ${pudoKey}`, "X-API-Key": pudoKey } });
   } catch {
-    // The v1 locker listing is unreliable on the provider side; try the legacy path as a secondary source.
+    // The v1 locker listing is occasionally unavailable; try the legacy path as a secondary source.
     result = await externalJson(`${pudoBase}/lockers-data`, { headers: { Authorization: `Bearer ${pudoKey}`, "X-API-Key": pudoKey } });
   }
-  // The v1 locker endpoint returns the full national list (3,600+ entries) and
-  // ignores a postal-code filter, so filter locally: exact match on the locker's
-  // own postal code first, falling back to an address-string match for lockers
-  // whose postal_code field is missing. Unfiltered results would force the
-  // customer to scroll through every locker in South Africa.
-  const list = result.lockers || result.data || result;
-  const wanted = String(postalCode || "").trim();
-  const all = (Array.isArray(list) ? list : []).map((locker: any) => ({
-    id: String(locker.id || locker.code),
-    name: String(locker.name || locker.label || "PUDO locker"),
-    address: String(locker.address || locker.address_line_1 || ""),
-    postalCode: String(locker.postalCode || locker.postal_code || ""),
-    availableSlots: Number(locker.availableSlots ?? locker.available_slots ?? 0),
-  }));
-  const exact = all.filter((l) => l.postalCode === wanted);
-  if (exact.length) return exact.sort((a, b) => a.name.localeCompare(b.name));
-  if (wanted) {
-    const fuzzy = all.filter((l) => l.address.toLowerCase().includes(wanted));
-    if (fuzzy.length) return fuzzy.sort((a, b) => a.name.localeCompare(b.name));
-    return [];
-  }
+  const container = result as Record<string, unknown>;
+  const list = container?.lockers || container?.data || result;
+  const all = (Array.isArray(list) ? list : []).map(normalizePudoLocker).filter((locker) => locker.id);
+  if (all.length) pudoLockerCache = { at: Date.now(), data: all };
   return all;
+}
+
+/**
+ * The provider returns the full national list (~3,770 points) and ignores any
+ * postal-code filter, so filtering happens here. Offline points are ranked last
+ * rather than hidden, so a customer is never left with no choice at all.
+ */
+async function fetchPudoLockers(postalCode: string, search = "") {
+  const all = await loadPudoLockers();
+  if (!all.length) return [];
+  const wanted = String(postalCode || "").trim().toLowerCase();
+  const term = String(search || "").trim().toLowerCase();
+  const rank = (locker: PudoLocker) => (locker.status.toLowerCase() === "online" ? 0 : 1);
+  const byName = (a: PudoLocker, b: PudoLocker) => rank(a) - rank(b) || a.name.localeCompare(b.name);
+
+  // Explicit search: match any of the fields a customer would type.
+  if (term) {
+    return all
+      .filter((locker) => {
+        const fields = [locker.name, locker.town, locker.postalCode, locker.address, locker.id];
+        return fields.some((field) => field.toLowerCase().includes(term));
+      })
+      .sort(byName)
+      .slice(0, 50);
+  }
+
+  if (wanted) {
+    const exact = all.filter((locker) => locker.postalCode.toLowerCase() === wanted);
+    if (exact.length) return exact.sort(byName);
+    const byTown = all.filter((locker) => locker.town.toLowerCase() === wanted);
+    if (byTown.length) return byTown.sort(byName);
+    const fuzzy = all.filter(
+      (locker) => locker.address.toLowerCase().includes(wanted) || locker.town.toLowerCase().includes(wanted),
+    );
+    return fuzzy.sort(byName).slice(0, 100);
+  }
+
+  return all.filter((locker) => rank(locker) === 0).sort(byName).slice(0, 200);
 }
 
 async function createOrderFromCart(body: Record<string, any>) {
@@ -2151,7 +2217,7 @@ async function handleFunction(name: string, body: Record<string, any>, req: Requ
 
 app.get("/api/functions/:name", async (req, res) => {
   try {
-    if (req.params.name === "shipping-rates" && req.query.action === "lockers") return res.json({ lockers: await fetchPudoLockers(String(req.query.postalCode || "")) });
+    if (req.params.name === "shipping-rates" && req.query.action === "lockers") return res.json({ lockers: await fetchPudoLockers(String(req.query.postalCode || ""), String(req.query.q || req.query.search || "")) });
     const data = await handleFunction(req.params.name, {}, req);
     if (data && typeof data === "object" && "raw" in data) return res.type(req.params.name === "sitemap" ? "application/xml" : "application/json").send((data as { raw: string }).raw);
     return res.json(data);
