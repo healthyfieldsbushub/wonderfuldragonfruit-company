@@ -1188,6 +1188,66 @@ async function metaRequest(pathname: string, body?: Record<string, unknown>) {
   });
 }
 
+async function metaConversations(platform: "facebook" | "instagram"): Promise<Record<string, unknown>[]> {
+  const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
+  const instagramId = String(process.env.INSTAGRAM_ID || "").trim();
+  const nodeId = platform === "instagram" ? instagramId : pageId;
+  if (!nodeId) throw new Error(platform === "instagram" ? "Instagram Business account ID is not configured in Manus Admin" : "Facebook Page ID is not configured in Manus Admin");
+  const result = await metaRequest(`${nodeId}/conversations`, {
+    fields: "id,updated_time,snippet,unread_count,participants,message_count",
+    platform: platform === "instagram" ? "instagram" : "messenger",
+    limit: "50",
+  });
+  const items = Array.isArray(result.data) ? result.data as Record<string, unknown>[] : [];
+  return items.map((conversation) => {
+    const participants = Array.isArray(conversation.participants?.data as unknown[]) ? (conversation.participants as { data: Record<string, unknown>[] }).data : [];
+    const customer = participants.find((participant) => String(participant.id || "") !== nodeId) || participants[0] || {};
+    return {
+      id: String(conversation.id || ""),
+      platformId: String(customer.id || conversation.id || ""),
+      name: String(customer.name || customer.username || customer.id || "Unknown contact"),
+      lastMessage: String(conversation.snippet || ""),
+      lastMessageTime: String(conversation.updated_time || ""),
+      unreadCount: Number(conversation.unread_count || 0),
+    };
+  }).filter((conversation) => conversation.id);
+}
+
+async function metaConversationMessages(conversationId: string): Promise<Record<string, unknown>[]> {
+  if (!conversationId) throw new Error("A conversation id is required");
+  const result = await metaRequest(`${conversationId}/messages`, {
+    fields: "id,message,from,created_time,attachments",
+    limit: "50",
+  });
+  const items = Array.isArray(result.data) ? result.data as Record<string, unknown>[] : [];
+  return items.map((message) => {
+    const from = (message.from && typeof message.from === "object") ? message.from as Record<string, unknown> : {};
+    const pageIds = [String(process.env.FACEBOOK_PAGE_ID || "").trim(), String(process.env.INSTAGRAM_ID || "").trim()];
+    const isBusiness = pageIds.includes(String(from.id || ""));
+    return {
+      id: String(message.id || ""),
+      fromId: String(from.id || ""),
+      fromName: isBusiness ? "You" : String(from.name || from.username || from.id || "Customer"),
+      content: String(message.message || ""),
+      direction: isBusiness ? "outbound" : "inbound",
+      status: "sent",
+      timestamp: String(message.created_time || ""),
+    };
+  });
+}
+
+async function metaSendMessage(platform: "facebook" | "instagram", recipientId: string, text: string) {
+  const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
+  const instagramId = String(process.env.INSTAGRAM_ID || "").trim();
+  const nodeId = platform === "instagram" ? instagramId : pageId;
+  if (!nodeId) throw new Error(platform === "instagram" ? "Instagram is not configured in Manus Admin" : "Facebook is not configured in Manus Admin");
+  return metaRequest(`${nodeId}/messages`, {
+    recipient: { id: recipientId },
+    messaging_type: "RESPONSE",
+    message: { text },
+  });
+}
+
 async function getSocialStatus() {
   const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
   const instagramId = String(process.env.INSTAGRAM_ID || "").trim();
@@ -1934,17 +1994,36 @@ async function handleFunction(name: string, body: Record<string, any>, req: Requ
     );
     return { success: true, orderId: donationId, orderNumber: donationOrderNumber };
   }
+  if (name === "social-conversations") {
+    if (!(await hasAdminPasswordAccess(req))) throw new Error("Verified admin access is required to read social conversations");
+    const platform = String(body.platform || "");
+    if (!["facebook", "instagram"].includes(platform)) throw new Error("Unsupported platform for conversation listing");
+    const conversations = await metaConversations(platform as "facebook" | "instagram");
+    return { conversations };
+  }
+  if (name === "social-thread") {
+    if (!(await hasAdminPasswordAccess(req))) throw new Error("Verified admin access is required to read social conversations");
+    const messages = await metaConversationMessages(String(body.conversationId || ""));
+    return { messages };
+  }
   if (name === "social-send") {
     // Admin Social Inbox reply. Only WhatsApp is connected; Meta page tokens for
     // Facebook/Instagram DMs are not configured yet.
     const platform = String(body.platform || "");
-    if (!["whatsapp"].includes(platform)) throw new Error(`${platform} is not connected yet - configure the Meta page token in Secrets to enable it`);
+    if (!["whatsapp", "facebook", "instagram"].includes(platform)) throw new Error(`Unsupported platform: ${platform}`);
     if (!(await hasAdminPasswordAccess(req))) throw new Error("Verified admin access is required to send messages from the business number");
-    const to = String(body.to || "").replace(/[^0-9]/g, "");
     const messageText = String(body.message || "").trim();
-    if (!to || !messageText) throw new Error("A recipient number and message are required");
-    await sendWhatsAppText(to, messageText);
-    return { success: true, sentTo: to };
+    if (!messageText) throw new Error("A message is required");
+    if (platform === "whatsapp") {
+      const to = String(body.to || "").replace(/[^0-9]/g, "");
+      if (!to) throw new Error("A recipient number is required");
+      await sendWhatsAppText(to, messageText);
+      return { success: true, platform, sentTo: to };
+    }
+    const recipientId = String(body.to || "").trim();
+    if (!recipientId) throw new Error("A recipient id is required");
+    const result = await metaSendMessage(platform as "facebook" | "instagram", recipientId, messageText);
+    return { success: true, platform, sentTo: recipientId, result };
   }
   if (name === "payfast-payment") return createPayFastCheckout(body);
   if (name === "send-email") {

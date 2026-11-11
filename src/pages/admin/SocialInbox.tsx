@@ -52,6 +52,7 @@ interface Contact {
   id: string;
   platform: "whatsapp" | "facebook" | "instagram";
   platformId: string;
+  conversationId?: string;
   name: string;
   avatar?: string;
   lastMessage?: string;
@@ -95,6 +96,29 @@ export default function SocialInbox() {
     },
   });
 
+  // Fetch Facebook / Instagram conversations (Meta Graph API via the server)
+  const { data: metaContacts = [], isLoading: loadingMeta, error: metaError } = useQuery({
+    queryKey: ["meta-contacts", selectedPlatform],
+    queryFn: async () => {
+      const response = await appClient.functions.invoke<{ conversations?: Array<Record<string, unknown>> }>("social-conversations", {
+        body: { platform: selectedPlatform },
+      });
+      if (response.error) throw response.error;
+      return (response.data?.conversations || []).map((c) => ({
+        id: String(c.id || ""),
+        platform: selectedPlatform as "facebook" | "instagram",
+        platformId: String(c.platformId || ""),
+        conversationId: String(c.id || ""),
+        name: String(c.name || c.platformId || "Unknown contact"),
+        lastMessage: String(c.lastMessage || ""),
+        lastMessageTime: String(c.lastMessageTime || ""),
+        unreadCount: Number(c.unreadCount || 0),
+      }));
+    },
+    enabled: selectedPlatform !== "whatsapp",
+    retry: false,
+  });
+
   // Fetch WhatsApp messages for selected contact
   const { data: messages = [], isLoading: loadingMessages } = useQuery({
     queryKey: ["social-messages", selectedPlatform, selectedContact?.platformId],
@@ -121,13 +145,26 @@ export default function SocialInbox() {
         }));
       }
 
-      return [];
+      const response = await appClient.functions.invoke<{ messages?: Array<Record<string, unknown>> }>("social-thread", {
+        body: { conversationId: selectedContact.conversationId || selectedContact.platformId },
+      });
+      if (response.error) throw response.error;
+      return (response.data?.messages || []).map((m) => ({
+        id: String(m.id || ""),
+        platform: selectedPlatform as "facebook" | "instagram",
+        fromId: String(m.fromId || ""),
+        fromName: String(m.fromName || "Customer"),
+        content: String(m.content || ""),
+        direction: (String(m.direction || "inbound") as "inbound" | "outbound"),
+        status: String(m.status || "sent"),
+        timestamp: String(m.timestamp || ""),
+      }));
     },
     enabled: !!selectedContact,
   });
 
   // Get contacts based on selected platform
-  const contacts = selectedPlatform === "whatsapp" ? whatsappContacts : [];
+  const contacts = selectedPlatform === "whatsapp" ? whatsappContacts : metaContacts;
   const filteredContacts = contacts.filter(
     (c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.platformId.includes(searchQuery)
   );
@@ -301,7 +338,7 @@ export default function SocialInbox() {
                 </CardHeader>
                 <CardContent className="p-0">
                   <ScrollArea className="h-[calc(100vh-430px)]">
-                    {loadingWhatsApp && platform.id === "whatsapp" ? (
+                    {((loadingWhatsApp && platform.id === "whatsapp") || (loadingMeta && platform.id !== "whatsapp")) ? (
                       <div className="flex items-center justify-center py-8">
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
                       </div>
@@ -316,8 +353,18 @@ export default function SocialInbox() {
                         ) : (
                           <>
                             {platform.id === "facebook" ? <Facebook className="h-12 w-12 mx-auto mb-2 opacity-50" /> : <Instagram className="h-12 w-12 mx-auto mb-2 opacity-50" />}
-                            <p className="font-medium text-foreground">Not connected yet</p>
-                            <p className="text-xs mt-1">Facebook and Instagram messaging need the Meta page token configured in Secrets.</p>
+                            {metaError ? (
+                              <>
+                                <p className="font-medium text-foreground">Not connected yet</p>
+                                <p className="text-xs mt-1">{metaError.message}</p>
+                                <p className="text-xs mt-1">Add FACEBOOK_PAGE_ACCESS_TOKEN, FACEBOOK_PAGE_ID and INSTAGRAM_ID in Settings &gt; Secrets to activate this inbox.</p>
+                              </>
+                            ) : (
+                              <>
+                                <p>No conversations yet</p>
+                                <p className="text-xs mt-1">Messages will appear here when customers message this account</p>
+                              </>
+                            )}
                           </>
                         )}
                       </div>
