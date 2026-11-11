@@ -2329,19 +2329,23 @@ async function bridgeSendWhatsAppTemplate(toNumber: string, templateName: string
     }
   }
 }
-async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
+// Returns true only when a provider actually accepted the message, so the stored
+// record reflects reality instead of always claiming success.
+async function sendWhatsAppText(toNumber: string, text: string): Promise<boolean> {
   if (process.env.WHATSAPP_SITE_KEY) {
     try {
       await bridgeSendWhatsAppText(toNumber, text);
-      return;
+      return true;
     } catch (error) {
       console.error("WhatsApp bridge send failed, trying Meta directly", error instanceof Error ? error.message : error);
     }
   }
   try {
     await graphSendWhatsApp({ to: toNumber, type: "text", text: { body: text } });
+    return true;
   } catch (error) {
     console.error("WhatsApp outbound send failed", error instanceof Error ? error.message : error);
+    return false;
   }
 }
 
@@ -2464,9 +2468,9 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
                 } else {
                   reply = `Thank you for contacting Wonderful Dragon Fruit South Africa! Our WhatsApp office replies between 07:00 and 17:00 SAST. For urgent help call or WhatsApp Head Office: +27 83 447 4639.`;
                 }
-                await sendWhatsAppText(from, reply);
-                await query("INSERT INTO whatsapp_messages (id, wa_message_id, direction, from_number, to_number, message_type, message_content, status, created_at) VALUES (?, ?, 'outbound', ?, ?, 'text', ?, 'sent', CURRENT_TIMESTAMP)",
-                  [crypto.randomUUID(), `out-${crypto.randomUUID()}`, WHATSAPP_PHONE_NUMBER_ID, from, reply]);
+                const delivered = await sendWhatsAppText(from, reply);
+                await query("INSERT INTO whatsapp_messages (id, wa_message_id, direction, from_number, to_number, message_type, message_content, status, created_at) VALUES (?, ?, 'outbound', ?, ?, 'text', ?, ?, CURRENT_TIMESTAMP)",
+                  [crypto.randomUUID(), `out-${crypto.randomUUID()}`, WHATSAPP_PHONE_NUMBER_ID, from, reply, delivered ? "sent" : "failed"]);
               } catch (e) {
                 console.error("WhatsApp AI reply failed", e instanceof Error ? e.message : e);
               }
