@@ -2793,6 +2793,27 @@ const SEO_COUNTRY_SUBDOMAINS: Array<{ code: string; region: string; name: string
   { code: "ao", region: "ao", name: "Angola" },
   { code: "cd", region: "cd", name: "DR Congo" },
   { code: "tz", region: "tz", name: "Tanzania" },
+  // Phase 2: North America, Australasia and Europe. The same single app serves
+  // each hostname with its own canonical, geo tags and hreflang cluster.
+  { code: "us", region: "us", name: "United States" },
+  { code: "ca", region: "ca", name: "Canada" },
+  { code: "au", region: "au", name: "Australia" },
+  { code: "nz", region: "nz", name: "New Zealand" },
+  { code: "gb", region: "gb", name: "United Kingdom" },
+  { code: "de", region: "de", name: "Germany" },
+  { code: "fr", region: "fr", name: "France" },
+  { code: "nl", region: "nl", name: "Netherlands" },
+  { code: "es", region: "es", name: "Spain" },
+  { code: "it", region: "it", name: "Italy" },
+  { code: "ch", region: "ch", name: "Switzerland" },
+  { code: "se", region: "se", name: "Sweden" },
+  { code: "no", region: "no", name: "Norway" },
+  { code: "dk", region: "dk", name: "Denmark" },
+  { code: "ie", region: "ie", name: "Ireland" },
+  { code: "pl", region: "pl", name: "Poland" },
+  { code: "pt", region: "pt", name: "Portugal" },
+  { code: "be", region: "be", name: "Belgium" },
+  { code: "at", region: "at", name: "Austria" },
 ];
 const SEO_STATIC_ROUTES: Array<{ path: string; changefreq: string; priority: string }> = [
   { path: "/", changefreq: "weekly", priority: "1.0" },
