@@ -6,6 +6,16 @@ import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import multer from "multer";
 import mysql, { type Pool, type ResultSetHeader, type RowDataPacket } from "mysql2/promise";
+import { renderDocumentPdf } from "./documentPdf";
+import {
+  createInvoice,
+  getInvoice,
+  listInvoices,
+  recordPayment,
+  cancelInvoice,
+  updateInvoice,
+  invoiceToPdfInput,
+} from "./invoices";
 import sharp from "sharp";
 import { configureOneMin, isOneMinConfigured, refreshModelCatalog, listCachedModels, getTaskAssignments, updateTaskAssignment, usageSummary, chatForTask, generateImage, getSettings, setSetting } from "./onemin";
 
@@ -3687,6 +3697,11 @@ app.put("/api/admin/ai/settings", async (req, res) => {
       applied[key] = value;
     }
     return res.json({ data: applied, error: null });
+  } catch (error) {
+    return res.status(400).json(apiError(error instanceof Error ? error.message : "Could not save AI settings", "AI_SETTINGS_ERROR", 400));
+  }
+});
+
  app.get("/{*splat}", async (req, res, next) => {
   try {
     const host = String(req.hostname || "").toLowerCase();
@@ -3714,6 +3729,181 @@ app.put("/api/admin/ai/settings", async (req, res) => {
 });
 
 // Vite output is served by this same Manus server in production. API routes above always win.
+// ------------------- Customer invoicing -------------------
+// Invoices are a separate document type from quotations. Every route is gated
+// on the admin password session, and payment status only ever moves through the
+// payment and cancel endpoints, never through create or edit.
+const requireInvoiceAdmin = async (req: Request, res: Response) => {
+  if (await hasAdminPasswordAccess(req)) return true;
+  res.status(401).json({ error: "Admin authentication required" });
+  return false;
+};
+
+app.get("/api/admin/invoices", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const rows = await listInvoices(query, {
+      paymentStatus: req.query.paymentStatus ? String(req.query.paymentStatus) : undefined,
+      status: req.query.status ? String(req.query.status) : undefined,
+      search: req.query.search ? String(req.query.search) : undefined,
+      limit: Number(req.query.limit) || 200,
+    });
+    res.json({ invoices: rows });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list invoices" });
+  }
+});
+
+app.get("/api/admin/invoices/:id", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const record = await getInvoice(query, req.params.id);
+    if (!record) return res.status(404).json({ error: "Invoice not found" });
+    res.json(record);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load invoice" });
+  }
+});
+
+app.post("/api/admin/invoices", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const body = (req.body || {}) as Record<string, unknown>;
+    if (!String(body.contactName || "").trim()) {
+      return res.status(400).json({ error: "Customer name is required" });
+    }
+    const items = Array.isArray(body.items) ? (body.items as Record<string, unknown>[]) : [];
+    if (!items.length) return res.status(400).json({ error: "At least one line item is required" });
+    const result = await createInvoice(query, {
+      ...body,
+      items: items.map((item) => ({
+        productId: item.productId ? String(item.productId) : null,
+        productName: String(item.productName || item.name || "Item"),
+        description: item.description ? String(item.description) : null,
+        productSku: item.productSku ? String(item.productSku) : null,
+        quantity: Number(item.quantity) || 1,
+        unitPrice: Number(item.unitPrice) || 0,
+        discount: Number(item.discount) || 0,
+      })),
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to create invoice" });
+  }
+});
+
+app.put("/api/admin/invoices/:id", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const result = await updateInvoice(query, req.params.id, {
+      ...body,
+      items: Array.isArray(body.items)
+        ? (body.items as Record<string, unknown>[]).map((item) => ({
+            productId: item.productId ? String(item.productId) : null,
+            productName: String(item.productName || item.name || "Item"),
+            description: item.description ? String(item.description) : null,
+            productSku: item.productSku ? String(item.productSku) : null,
+            quantity: Number(item.quantity) || 1,
+            unitPrice: Number(item.unitPrice) || 0,
+            discount: Number(item.discount) || 0,
+          }))
+        : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to update invoice" });
+  }
+});
+
+app.post("/api/admin/invoices/:id/payment", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const result = await recordPayment(query, req.params.id, {
+      amount: Number(body.amount) || 0,
+      reference: body.reference ? String(body.reference) : undefined,
+      paymentDate: body.paymentDate ? String(body.paymentDate) : undefined,
+      markPaidInFull: Boolean(body.markPaidInFull),
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to record payment" });
+  }
+});
+
+app.post("/api/admin/invoices/:id/cancel", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const result = await cancelInvoice(query, req.params.id, String(body.reason || "Cancelled by administrator"));
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to cancel invoice" });
+  }
+});
+
+app.get("/api/admin/invoices/:id/pdf", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const record = await getInvoice(query, req.params.id);
+    if (!record) return res.status(404).json({ error: "Invoice not found" });
+    const pdf = await renderDocumentPdf(invoiceToPdfInput(record.invoice, record.items));
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${record.invoice.invoice_number}.pdf"`);
+    res.send(pdf);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to render invoice PDF" });
+  }
+});
+
+app.get("/api/admin/quotations/:id/pdf", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const quotations = await query<RowDataPacket[]>("SELECT * FROM quotations WHERE id = ?", [req.params.id]);
+    if (!quotations.length) return res.status(404).json({ error: "Quotation not found" });
+    const items = await query<RowDataPacket[]>(
+      "SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY created_at",
+      [req.params.id],
+    );
+    const quotation = quotations[0];
+    const pdf = await renderDocumentPdf({
+      documentTitle: "Quotation",
+      documentNumber: String(quotation.quotation_number),
+      documentDate: String(quotation.created_at).slice(0, 10),
+      dueDate: null,
+      contactName: String(quotation.customer_name || "Customer"),
+      companyName: quotation.company_name || null,
+      email: quotation.email || null,
+      whatsapp: quotation.phone || null,
+      billingAddress: quotation.billing_address || null,
+      items: items.map((item) => ({
+        productName: String(item.product_name),
+        description: null,
+        sku: item.product_sku || null,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unit_price_zar),
+        discount: 0,
+        total: Number(item.total_price_zar),
+      })),
+      subtotal: Number(quotation.subtotal_zar),
+      discount: 0,
+      vatEnabled: Boolean(quotation.vat_enabled),
+      vatRate: 15,
+      vat: Number(quotation.vat_zar),
+      total: Number(quotation.total_zar),
+      paymentTerms: "Quotation valid for 14 days.",
+      notes: quotation.notes || null,
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${quotation.quotation_number}.pdf"`);
+    res.send(pdf);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to render quotation PDF" });
+  }
+});
+
+
 app.use(express.static(path.join(root, "dist")));
 // Per-route SEO rendering: the built index.html carries the homepage's title/
 // canonical for every route. Without this, every product and blog page tells
@@ -3855,11 +4045,6 @@ app.get("/{*splat}", async (req, res) => {
   } catch (error) {
     console.error("SEO route render failed", error instanceof Error ? error.message : error);
     return res.sendFile(path.join(root, "dist", "index.html"));
-  }
-});
-
- } catch (error) {
-    return res.status(400).json(apiError(error instanceof Error ? error.message : "Could not save AI settings", "AI_SETTINGS_ERROR", 400));
   }
 });
 
