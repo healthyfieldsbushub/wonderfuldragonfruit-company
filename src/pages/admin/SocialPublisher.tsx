@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Facebook, Instagram, Loader2, RefreshCw, Send } from "lucide-react";
 import { toast } from "sonner";
 import { appClient } from "@/integrations/manus/client";
@@ -30,6 +30,8 @@ function publicUrl(value: string) {
 
 export default function SocialPublisher() {
   const [facebookMessage, setFacebookMessage] = useState("");
+  const [facebookPages, setFacebookPages] = useState<Array<{ page_id: string; name: string; is_primary: number | boolean }>>([]);
+  const [selectedPageId, setSelectedPageId] = useState("");
   const [facebookLink, setFacebookLink] = useState("");
   const [facebookImage, setFacebookImage] = useState("");
   const [instagramCaption, setInstagramCaption] = useState("");
@@ -53,6 +55,21 @@ export default function SocialPublisher() {
     }
   };
 
+  const loadFacebookPages = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/facebook/pages", { credentials: "include" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const list = Array.isArray(payload?.data) ? payload.data : [];
+      setFacebookPages(list);
+      setSelectedPageId((current) => current || String(list.find((page: { is_primary: number | boolean }) => page.is_primary)?.page_id || list[0]?.page_id || ""));
+    } catch {
+      /* page list is optional; publishing still works with the primary Page */
+    }
+  }, []);
+
+  useEffect(() => { void loadFacebookPages(); }, [loadFacebookPages]);
+
   const publishFacebook = async () => {
     if (!facebookMessage.trim() && !facebookLink.trim() && !facebookImage.trim()) {
       toast.error("Add a message, link, or image first");
@@ -65,6 +82,7 @@ export default function SocialPublisher() {
           message: facebookMessage,
           link: facebookLink ? publicUrl(facebookLink) : undefined,
           imageUrl: facebookImage ? publicUrl(facebookImage) : undefined,
+          pageId: selectedPageId || undefined,
         },
       });
       if (response.error) throw new Error(response.error.message);
@@ -158,6 +176,25 @@ export default function SocialPublisher() {
               <CardDescription>Publish text, a link preview, or a public image to the configured Facebook Page.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="facebook-page-select">Publish to Page</Label>
+                <select
+                  id="facebook-page-select"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={selectedPageId}
+                  onChange={(event) => setSelectedPageId(event.target.value)}
+                >
+                  {facebookPages.length === 0 && <option value="">Primary Page (default)</option>}
+                  {facebookPages.map((page) => (
+                    <option key={page.page_id} value={page.page_id}>
+                      {page.name}{page.is_primary ? " (primary)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Manage the connected Pages under Admin → Facebook Pages.
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="facebook-message">Message</Label>
                 <Textarea id="facebook-message" value={facebookMessage} onChange={(event) => setFacebookMessage(event.target.value)} placeholder="Share a farm update, product announcement, or helpful growing tip…" rows={5} />

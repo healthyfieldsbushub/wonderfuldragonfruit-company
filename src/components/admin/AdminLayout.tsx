@@ -34,6 +34,7 @@ import {
   Upload,
   Send,
   FileUp,
+  Facebook,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -93,6 +94,7 @@ const navItems = [
   { title: 'WhatsApp', url: '/admin/whatsapp', icon: MessageSquare },
   { title: 'Social Inbox', url: '/admin/social-inbox', icon: Inbox },
   { title: 'Social Publisher', url: '/admin/social-publisher', icon: Send },
+  { title: 'Facebook Pages', url: '/admin/facebook-pages', icon: Facebook },
   { title: 'Chat Settings', url: '/admin/chat-settings', icon: MessageSquare },
   { title: 'Knowledge Base', url: '/admin/knowledge-base', icon: Brain },
   

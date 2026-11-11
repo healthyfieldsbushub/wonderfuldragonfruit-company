@@ -55,6 +55,7 @@ const AdminAPIVault = lazy(() => import("./pages/admin/APIKeyVault"));
 const AdminWhatsApp = lazy(() => import("./pages/admin/WhatsAppInbox"));
 const AdminSocialInbox = lazy(() => import("./pages/admin/SocialInbox"));
 const AdminSocialPublisher = lazy(() => import("./pages/admin/SocialPublisher"));
+const AdminFacebookPages = lazy(() => import("./pages/admin/FacebookPages"));
 // AIModelConfig removed - superseded by AIConfiguration
 const AdminChatSettings = lazy(() => import("./pages/admin/ChatSettings"));
 const AdminShippingRates = lazy(() => import("./pages/admin/ShippingRates"));
@@ -256,6 +257,7 @@ const App = () => (
                 <Route path="whatsapp" element={<AdminWhatsApp />} />
                 <Route path="social-inbox" element={<AdminSocialInbox />} />
                 <Route path="social-publisher" element={<AdminSocialPublisher />} />
+                <Route path="facebook-pages" element={<AdminFacebookPages />} />
                 {/* ai-models route removed - redirected to ai-config */}
                 <Route path="chat-settings" element={<AdminChatSettings />} />
                 <Route path="shipping-rates" element={<AdminShippingRates />} />
