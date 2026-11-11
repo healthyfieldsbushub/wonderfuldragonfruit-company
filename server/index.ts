@@ -3558,10 +3558,7 @@ app.get("/api/admin/ai/usage", async (req, res) => {
     if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
     const days = Number(req.query.days || 30);
     const summary = await usageSummary(Number.isFinite(days) ? days : 30);
-    const recent = (await query<RowDataPacket[]>(
-      "SELECT task_key, model, total_tokens, latency_ms, status, error_message, created_at FROM ai_usage_log ORDER BY id DESC LIMIT 40",
-    )) as RowDataPacket[];
-    return res.json({ data: { ...summary, recent }, error: null });
+    return res.json({ data: summary, error: null });
   } catch (error) {
     return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not load AI usage", "AI_USAGE_ERROR", 500));
   }

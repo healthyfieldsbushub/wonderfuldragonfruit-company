@@ -8,8 +8,12 @@
  * `API-KEY` header instead.
  *
  * Model IDs are never hardcoded as truth: the catalog is refreshed live from
- * /openai/v1/models and cached in `ai_models`. Per-task model choice lives in
- * `ai_task_assignments` so an administrator can change models without a deploy.
+ * /openai/v1/models and cached in `ai_models`.
+ *
+ * Per-task model choice lives in the pre-existing `ai_model_config` table
+ * (`function_type` is the task key) so the engine and the existing AI
+ * Configuration admin page share one source of truth. Usage is recorded in the
+ * pre-existing `ai_usage_log` table.
  */
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<unknown[]>;
@@ -42,7 +46,7 @@ function rejectsSampling(model: string) {
 async function readError(response: Response) {
   const text = await response.text().catch(() => "");
   try {
-    const parsed = JSON.parse(text) as { error?: { message?: string; code?: string }; message?: string; errorCode?: string };
+    const parsed = JSON.parse(text) as { error?: { message?: string }; message?: string; errorCode?: string };
     return parsed.error?.message || parsed.message || parsed.errorCode || text.slice(0, 300) || `HTTP ${response.status}`;
   } catch {
     return text.slice(0, 300) || `HTTP ${response.status}`;
@@ -74,7 +78,7 @@ export async function refreshModelCatalog(): Promise<{ count: number; models: st
       [id, String(model.owned_by || "unknown")],
     );
   }
-  // Anything no longer advertised by the provider is marked inactive rather than deleted,
+  // Anything the provider no longer advertises is marked inactive rather than deleted,
   // so historical usage rows keep a resolvable model reference.
   if (seen.length) {
     await dbQuery(
@@ -92,63 +96,83 @@ export async function refreshModelCatalog(): Promise<{ count: number; models: st
 
 export async function listCachedModels(capability?: string) {
   if (!dbQuery) return [];
-  const rows = (await dbQuery(
+  return (await dbQuery(
     capability
       ? "SELECT id, provider, owned_by, capabilities, is_active, last_seen_at FROM ai_models WHERE capabilities = ? ORDER BY is_active DESC, owned_by, id"
       : "SELECT id, provider, owned_by, capabilities, is_active, last_seen_at FROM ai_models ORDER BY is_active DESC, capabilities, owned_by, id",
     capability ? [capability] : [],
   )) as Record<string, unknown>[];
-  return rows;
 }
 
 // ---------------------------------------------------------------------------
-// Task assignments
+// Task assignments (stored in the pre-existing ai_model_config table)
 // ---------------------------------------------------------------------------
 
 export async function getTaskAssignments() {
   if (!dbQuery) return [];
   return (await dbQuery(
-    "SELECT task_key, label, category, provider, model, fallback_model, max_tokens, temperature, is_enabled, notes, updated_at FROM ai_task_assignments ORDER BY category, task_key",
+    `SELECT function_type AS task_key,
+            COALESCE(NULLIF(label, ''), function_type) AS label,
+            COALESCE(NULLIF(category, ''), 'text') AS category,
+            provider,
+            model_id AS model,
+            fallback_model,
+            max_tokens,
+            is_active AS is_enabled,
+            notes,
+            updated_at
+       FROM ai_model_config
+      ORDER BY category, function_type`,
   )) as Record<string, unknown>[];
 }
 
 export async function resolveAssignment(taskKey: string) {
   if (!dbQuery) throw new Error("1min.ai engine is not initialised");
   const rows = (await dbQuery(
-    "SELECT task_key, model, fallback_model, max_tokens, temperature, is_enabled, provider FROM ai_task_assignments WHERE task_key = ? LIMIT 1",
+    `SELECT function_type, model_id, fallback_model, max_tokens, is_active, provider
+       FROM ai_model_config WHERE function_type = ? LIMIT 1`,
     [taskKey],
   )) as Record<string, unknown>[];
   if (!rows.length) throw new Error(`Unknown AI task: ${taskKey}`);
   const row = rows[0];
-  if (!Number(row.is_enabled)) throw new Error(`AI task "${taskKey}" is disabled`);
+  if (!Number(row.is_active)) throw new Error(`AI task "${taskKey}" is disabled`);
   return {
     taskKey,
-    model: String(row.model || ""),
+    model: String(row.model_id || ""),
     fallbackModel: String(row.fallback_model || ""),
     maxTokens: Number(row.max_tokens) || 2048,
-    temperature: row.temperature === null || row.temperature === undefined ? null : Number(row.temperature),
+    temperature: null as number | null,
     provider: String(row.provider || "onemin"),
   };
 }
 
 export async function updateTaskAssignment(taskKey: string, patch: Record<string, unknown>) {
   if (!dbQuery) throw new Error("1min.ai engine is not initialised");
-  const allowed = ["model", "fallback_model", "max_tokens", "temperature", "is_enabled", "notes"] as const;
+  // The admin UI speaks the engine's vocabulary; map it onto the existing columns.
+  const columnFor: Record<string, string> = {
+    model: "model_id",
+    fallback_model: "fallback_model",
+    max_tokens: "max_tokens",
+    is_enabled: "is_active",
+    notes: "notes",
+    label: "label",
+  };
   const sets: string[] = [];
   const values: unknown[] = [];
-  for (const field of allowed) {
+  for (const [field, column] of Object.entries(columnFor)) {
     if (!(field in patch)) continue;
-    sets.push(`${field} = ?`);
+    sets.push(`${column} = ?`);
     values.push(patch[field]);
   }
   if (!sets.length) throw new Error("No updatable fields supplied");
+  sets.push("provider = 'onemin'");
   values.push(taskKey);
-  await dbQuery(`UPDATE ai_task_assignments SET ${sets.join(", ")} WHERE task_key = ?`, values);
+  await dbQuery(`UPDATE ai_model_config SET ${sets.join(", ")} WHERE function_type = ?`, values);
   return resolveAssignment(taskKey);
 }
 
 // ---------------------------------------------------------------------------
-// Usage accounting
+// Usage accounting (stored in the pre-existing ai_usage_log table)
 // ---------------------------------------------------------------------------
 
 export async function logUsage(entry: {
@@ -166,18 +190,19 @@ export async function logUsage(entry: {
   if (!dbQuery) return;
   try {
     await dbQuery(
-      `INSERT INTO ai_usage_log (task_key, provider, model, prompt_tokens, completion_tokens, total_tokens, latency_ms, status, error_message, country_code, page_id)
+      `INSERT INTO ai_usage_log
+         (provider_name, model_id, function_type, prompt_tokens, completion_tokens, total_tokens, success, error_message, response_time_ms, country_code, page_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        entry.taskKey,
         entry.provider || "onemin",
         entry.model || "",
+        entry.taskKey,
         entry.promptTokens || 0,
         entry.completionTokens || 0,
         (entry.promptTokens || 0) + (entry.completionTokens || 0),
-        entry.latencyMs || 0,
-        entry.status || "success",
+        entry.status === "error" ? 0 : 1,
         String(entry.error || "").slice(0, 500),
+        entry.latencyMs || 0,
         entry.countryCode || "",
         entry.pageId || "",
       ],
@@ -188,37 +213,38 @@ export async function logUsage(entry: {
 }
 
 export async function usageSummary(days = 30) {
-  if (!dbQuery) return { totals: null, byTask: [], byDay: [], byModel: [] };
+  if (!dbQuery) return { totals: null, byTask: [], byDay: [], byModel: [], recent: [] };
   const window = Math.max(1, Math.min(365, Math.floor(days)));
   const totals = (await dbQuery(
     `SELECT COUNT(*) AS calls,
-            SUM(status = 'error') AS failures,
+            SUM(success = 0) AS failures,
             SUM(prompt_tokens) AS prompt_tokens,
             SUM(completion_tokens) AS completion_tokens,
             SUM(total_tokens) AS total_tokens,
-            ROUND(AVG(latency_ms)) AS avg_latency_ms
-       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
-    [window],
+            ROUND(AVG(response_time_ms)) AS avg_latency_ms
+       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${window} DAY)`,
   )) as Record<string, unknown>[];
   const byTask = (await dbQuery(
-    `SELECT task_key, COUNT(*) AS calls, SUM(total_tokens) AS total_tokens, SUM(status='error') AS failures
-       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-       GROUP BY task_key ORDER BY calls DESC`,
-    [window],
+    `SELECT function_type AS task_key, COUNT(*) AS calls, SUM(total_tokens) AS total_tokens, SUM(success = 0) AS failures
+       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${window} DAY)
+       GROUP BY function_type ORDER BY calls DESC`,
   )) as Record<string, unknown>[];
   const byDay = (await dbQuery(
     `SELECT DATE(created_at) AS day, COUNT(*) AS calls, SUM(total_tokens) AS total_tokens
-       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${window} DAY)
        GROUP BY DATE(created_at) ORDER BY day`,
-    [window],
   )) as Record<string, unknown>[];
   const byModel = (await dbQuery(
-    `SELECT model, COUNT(*) AS calls, SUM(total_tokens) AS total_tokens
-       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-       GROUP BY model ORDER BY calls DESC LIMIT 25`,
-    [window],
+    `SELECT model_id AS model, COUNT(*) AS calls, SUM(total_tokens) AS total_tokens
+       FROM ai_usage_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${window} DAY)
+       GROUP BY model_id ORDER BY calls DESC LIMIT 25`,
   )) as Record<string, unknown>[];
-  return { totals: totals[0] || null, byTask, byDay, byModel };
+  const recent = (await dbQuery(
+    `SELECT function_type AS task_key, model_id AS model, total_tokens, response_time_ms AS latency_ms,
+            IF(success = 1, 'success', 'error') AS status, error_message, created_at
+       FROM ai_usage_log ORDER BY created_at DESC LIMIT 40`,
+  )) as Record<string, unknown>[];
+  return { totals: totals[0] || null, byTask, byDay, byModel, recent };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,18 +300,11 @@ export async function chatForTask(options: {
     };
   };
 
+  const base = { taskKey: options.taskKey, countryCode: options.countryCode, pageId: options.pageId };
+
   try {
     const result = await attempt(assignment.model, "onemin");
-    await logUsage({
-      taskKey: options.taskKey,
-      model: result.model,
-      promptTokens: result.usage.promptTokens,
-      completionTokens: result.usage.completionTokens,
-      latencyMs: Date.now() - started,
-      status: "success",
-      countryCode: options.countryCode,
-      pageId: options.pageId,
-    });
+    await logUsage({ ...base, model: result.model, promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens, latencyMs: Date.now() - started, status: "success" });
     return result;
   } catch (primaryError) {
     const message = primaryError instanceof Error ? primaryError.message : String(primaryError);
@@ -294,7 +313,7 @@ export async function chatForTask(options: {
       try {
         const result = await attempt(assignment.fallbackModel, "onemin-fallback");
         await logUsage({
-          taskKey: options.taskKey,
+          ...base,
           model: result.model,
           provider: "onemin-fallback",
           promptTokens: result.usage.promptTokens,
@@ -302,21 +321,11 @@ export async function chatForTask(options: {
           latencyMs: Date.now() - started,
           status: "success",
           error: `primary failed: ${message}`,
-          countryCode: options.countryCode,
-          pageId: options.pageId,
         });
         return result;
       } catch (fallbackError) {
         const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-        await logUsage({
-          taskKey: options.taskKey,
-          model: assignment.model,
-          latencyMs: Date.now() - started,
-          status: "error",
-          error: `${message} | fallback: ${fallbackMessage}`,
-          countryCode: options.countryCode,
-          pageId: options.pageId,
-        });
+        await logUsage({ ...base, model: assignment.model, latencyMs: Date.now() - started, status: "error", error: `${message} | fallback: ${fallbackMessage}` });
         // Last resort: the site's existing NVIDIA provider keeps customer-facing
         // replies alive if 1min.ai is rate limited or out of credits.
         if (fallbackFn) {
@@ -327,15 +336,7 @@ export async function chatForTask(options: {
       }
     }
 
-    await logUsage({
-      taskKey: options.taskKey,
-      model: assignment.model,
-      latencyMs: Date.now() - started,
-      status: "error",
-      error: message,
-      countryCode: options.countryCode,
-      pageId: options.pageId,
-    });
+    await logUsage({ ...base, model: assignment.model, latencyMs: Date.now() - started, status: "error", error: message });
     if (fallbackFn) {
       const text = await fallbackFn({ messages: options.messages, max_tokens: limit });
       return { text, model: "nvidia-fallback", provider: "nvidia", usage: { promptTokens: 0, completionTokens: 0 } };
