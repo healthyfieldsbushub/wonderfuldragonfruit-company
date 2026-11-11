@@ -77,6 +77,8 @@ const navItems = [
 
   { title: 'Subscriptions', url: '/admin/subscriptions', icon: Tag },
   
+  // AI Marketing engine (1min.ai)
+  { title: 'AI Marketing (1min.ai)', url: '/admin/ai-marketing', icon: Sparkles },
   // AI Layer 2 - Central Configuration
   { title: 'AI Configuration', url: '/admin/ai-config', icon: Cpu },
   

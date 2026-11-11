@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import mysql, { type Pool, type ResultSetHeader, type RowDataPacket } from "mysql2/promise";
 import sharp from "sharp";
+import { configureOneMin, isOneMinConfigured, refreshModelCatalog, listCachedModels, getTaskAssignments, updateTaskAssignment, usageSummary, chatForTask, generateImage, getSettings, setSetting } from "./onemin";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -3461,7 +3462,169 @@ app.get("/api/seo/submit", async (req, res) => {
 // host-aware canonical + hreflang cluster into the HTML so each country site is
 // recognised by search engines as its own regional variant.
 const SEO_MAIN_HOSTS = new Set(["www.wonderfuldragonfruit.company", "wonderfuldragonfruit.company", "localhost", "127.0.0.1"]);
-app.get("/{*splat}", async (req, res, next) => {
+// ---------------------------------------------------------------------------
+// 1min.ai AI marketing engine — administration API.
+// Every route is gated by the admin password session; the API key is used
+// server-side only and is never returned to the browser.
+// ---------------------------------------------------------------------------
+configureOneMin({
+  query: async (sql, params) => query<RowDataPacket[]>(sql, params as unknown[]),
+  fallback: async (body) => {
+    const result = (await callNvidiaDirect({
+      messages: body.messages,
+      maxTokens: body.max_tokens,
+      max_tokens: body.max_tokens,
+    })) as { content?: string; text?: string };
+    return String(result.content || result.text || "");
+  },
+});
+
+const AI_SETTING_KEYS = [
+  "ai_marketing_enabled",
+  "blog_articles_per_page_per_day",
+  "auto_publish_facebook",
+  "require_manual_approval",
+  "publishing_timezone",
+];
+
+app.get("/api/admin/ai/status", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const settings = await getSettings();
+    const counts = (await query<RowDataPacket[]>(
+      "SELECT capabilities, COUNT(*) AS total FROM ai_models WHERE is_active = 1 GROUP BY capabilities",
+    )) as RowDataPacket[];
+    return res.json({
+      data: {
+        configured: isOneMinConfigured(),
+        text_model_count: Number(counts.find((r) => String(r.capabilities) === "text")?.total || 0),
+        image_model_count: Number(counts.find((r) => String(r.capabilities) === "image")?.total || 0),
+        settings,
+        endpoints: {
+          text: process.env.ONEMIN_API_BASE || "https://api.1min.ai/openai/v1",
+          image: `${process.env.ONEMIN_API_BASE_LEGACY || "https://api.1min.ai/api"}/features`,
+        },
+      },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not read AI status", "AI_STATUS_ERROR", 500));
+  }
+});
+
+app.get("/api/admin/ai/models", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const capability = req.query.capability ? String(req.query.capability) : undefined;
+    return res.json({ data: await listCachedModels(capability), error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not list models", "AI_MODELS_ERROR", 500));
+  }
+});
+
+app.post("/api/admin/ai/models/refresh", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const result = await refreshModelCatalog();
+    return res.json({ data: { refreshed: result.count, models: result.models }, error: null });
+  } catch (error) {
+    return res.status(502).json(apiError(error instanceof Error ? error.message : "Model refresh failed", "AI_MODELS_REFRESH_ERROR", 502));
+  }
+});
+
+app.get("/api/admin/ai/tasks", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    return res.json({ data: await getTaskAssignments(), error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not load AI tasks", "AI_TASKS_ERROR", 500));
+  }
+});
+
+app.put("/api/admin/ai/tasks", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const taskKey = String((req.body || {}).task_key || "").trim();
+    if (!taskKey) return res.status(400).json(apiError("task_key is required", "AI_TASK_INVALID", 400));
+    const updated = await updateTaskAssignment(taskKey, req.body || {});
+    return res.json({ data: updated, error: null });
+  } catch (error) {
+    return res.status(400).json(apiError(error instanceof Error ? error.message : "Could not update AI task", "AI_TASK_UPDATE_ERROR", 400));
+  }
+});
+
+app.get("/api/admin/ai/usage", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const days = Number(req.query.days || 30);
+    const summary = await usageSummary(Number.isFinite(days) ? days : 30);
+    const recent = (await query<RowDataPacket[]>(
+      "SELECT task_key, model, total_tokens, latency_ms, status, error_message, created_at FROM ai_usage_log ORDER BY id DESC LIMIT 40",
+    )) as RowDataPacket[];
+    return res.json({ data: { ...summary, recent }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not load AI usage", "AI_USAGE_ERROR", 500));
+  }
+});
+
+app.post("/api/admin/ai/test", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const taskKey = String((req.body || {}).task_key || "customer_service");
+    const prompt = String((req.body || {}).prompt || "Reply with exactly: DFSA 1min.ai engine OK");
+    const started = Date.now();
+    const result = await chatForTask({
+      taskKey,
+      messages: [{ role: "user", content: prompt }],
+      maxTokens: 128,
+    });
+    return res.json({
+      data: {
+        task_key: taskKey,
+        model: result.model,
+        provider: result.provider,
+        reply: result.text,
+        usage: result.usage,
+        latency_ms: Date.now() - started,
+      },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(502).json(apiError(error instanceof Error ? error.message : "AI test failed", "AI_TEST_ERROR", 502));
+  }
+});
+
+app.post("/api/admin/ai/image", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const body = req.body || {};
+    const prompt = String(body.prompt || "").trim();
+    if (!prompt) return res.status(400).json(apiError("prompt is required", "AI_IMAGE_INVALID", 400));
+    const result = await generateImage({
+      prompt,
+      aspectRatio: body.aspect_ratio ? String(body.aspect_ratio) : undefined,
+      model: body.model ? String(body.model) : undefined,
+      quality: body.quality ? Number(body.quality) : undefined,
+    });
+    return res.json({ data: result, error: null });
+  } catch (error) {
+    return res.status(502).json(apiError(error instanceof Error ? error.message : "Image generation failed", "AI_IMAGE_ERROR", 502));
+  }
+});
+
+app.put("/api/admin/ai/settings", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const body = req.body || {};
+    const applied: Record<string, string> = {};
+    for (const key of AI_SETTING_KEYS) {
+      if (!(key in body)) continue;
+      const value = typeof body[key] === "boolean" ? (body[key] ? "1" : "0") : String(body[key]);
+      await setSetting(key, value);
+      applied[key] = value;
+    }
+    return res.json({ data: applied, error: null });
+ app.get("/{*splat}", async (req, res, next) => {
   try {
     const host = String(req.hostname || "").toLowerCase();
     const match = host.match(/^([a-z]{2})\.wonderfuldragonfruit\.company$/);
@@ -3607,6 +3770,33 @@ app.get("/{*splat}", async (req, res) => {
   } catch (error) {
     console.error("SEO route render failed", error instanceof Error ? error.message : error);
     return res.sendFile(path.join(root, "dist", "index.html"));
+  }
+});
+
+app.get("/{*splat}", async (req, res) => {
+  try {
+    const payload = await seoRoutePayload(req.path);
+    if (payload.redirectTo) return res.redirect(301, payload.redirectTo);
+    let html = await fs.readFile(path.join(root, "dist", "index.html"), "utf8");
+    const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    html = html.replace(/<title>.*?<\/title>/, `<title>${escapeHtml(payload.title)}</title>`);
+    html = html.replace(/<link rel="canonical"[^>]*>/, `<link rel="canonical" href="${escapeHtml(payload.canonical)}" />`);
+    if (!html.includes('<link rel="canonical"')) html = html.replace("</title>", `</title>\n    <link rel="canonical" href="${escapeHtml(payload.canonical)}" />`);
+    if (/<meta name="description" /.test(html)) html = html.replace(/<meta name="description" content="[^"]*"/, `<meta name="description" content="${escapeHtml(payload.description)}"`);
+    else html = html.replace("</title>", `</title>\n    <meta name="description" content="${escapeHtml(payload.description)}" />`);
+    html = html.replace(/<meta property="og:title" content="[^"]*"/, `<meta property="og:title" content="${escapeHtml(payload.title)}"`);
+    html = html.replace(/<meta property="og:description" content="[^"]*"/, `<meta property="og:description" content="${escapeHtml(payload.description)}"`);
+    html = html.replace(/<meta property="og:url" content="[^"]*"/, `<meta property="og:url" content="${escapeHtml(payload.canonical)}"`);
+    if (payload.jsonLd) html = html.replace("</head>", `    <script type="application/ld+json">${payload.jsonLd}</script>\n  </head>`);
+    return res.status(payload.notFound ? 404 : 200).type("html").send(html);
+  } catch (error) {
+    console.error("SEO route render failed", error instanceof Error ? error.message : error);
+    return res.sendFile(path.join(root, "dist", "index.html"));
+  }
+});
+
+ } catch (error) {
+    return res.status(400).json(apiError(error instanceof Error ? error.message : "Could not save AI settings", "AI_SETTINGS_ERROR", 400));
   }
 });
 
