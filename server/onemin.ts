@@ -263,11 +263,16 @@ export async function chatForTask(options: {
   const limit = options.maxTokens || assignment.maxTokens;
   const started = Date.now();
 
-  const attempt = async (model: string, provider: string) => {
+  const attempt = async (model: string, provider: string, overrideLimit?: number) => {
+    const reasoning = rejectsSampling(model);
+    // Reasoning models spend part of the completion budget on hidden reasoning
+    // tokens, so a small budget can be exhausted before any visible text is
+    // produced (finish_reason: length with empty content). Give them a floor.
+    const budget = overrideLimit ?? (reasoning ? Math.max(limit, 2048) : limit);
     const body: Record<string, unknown> = {
       model,
       messages: options.messages,
-      max_completion_tokens: limit,
+      max_completion_tokens: budget,
     };
     if (assignment.temperature !== null && !rejectsSampling(model)) body.temperature = assignment.temperature;
     if (options.jsonSchema) {
@@ -300,10 +305,24 @@ export async function chatForTask(options: {
     };
   };
 
+  // A length-limited empty response is recoverable: retry once with a much
+  // larger budget before degrading to the fallback model.
+  const attemptWithRetry = async (model: string, provider: string) => {
+    try {
+      return await attempt(model, provider);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/finish_reason: length/.test(message)) {
+        return await attempt(model, provider, Math.max(limit * 4, 4096));
+      }
+      throw error;
+    }
+  };
+
   const base = { taskKey: options.taskKey, countryCode: options.countryCode, pageId: options.pageId };
 
   try {
-    const result = await attempt(assignment.model, "onemin");
+    const result = await attemptWithRetry(assignment.model, "onemin");
     await logUsage({ ...base, model: result.model, promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens, latencyMs: Date.now() - started, status: "success" });
     return result;
   } catch (primaryError) {
@@ -311,7 +330,7 @@ export async function chatForTask(options: {
 
     if (assignment.fallbackModel && assignment.fallbackModel !== assignment.model) {
       try {
-        const result = await attempt(assignment.fallbackModel, "onemin-fallback");
+        const result = await attemptWithRetry(assignment.fallbackModel, "onemin-fallback");
         await logUsage({
           ...base,
           model: result.model,
