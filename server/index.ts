@@ -45,7 +45,11 @@ async function processProductImage(buffer: Buffer, originalName: string) {
 
 app.disable("x-powered-by");
 app.use(cookieParser());
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({
+  limit: "4mb",
+  // Meta signs the exact raw payload; keep it so X-Hub-Signature-256 can be verified.
+  verify: (req, _res, buf) => { (req as Request & { rawBody?: Buffer }).rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 function apiError(message: string, code = "APP_ERROR", status = 400) {
@@ -1104,6 +1108,11 @@ async function notifyOwner(title: string, content: string) {
   }
 }
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
+// Direct Meta integration. When META_WHATSAPP_TOKEN is present the site talks to
+// Meta's Graph API itself and the Cloudflare bridge is no longer used.
+const META_APP_SECRET = String(process.env.META_APP_SECRET || "");
+const META_WHATSAPP_TOKEN = String(process.env.META_WHATSAPP_TOKEN || "");
+const META_WEBHOOK_VERIFY_TOKEN = String(process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "");
 
 /**
  * Distributor enquiry email routing.
@@ -2254,19 +2263,45 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "136350
 const WHATSAPP_SITE_NUMBER = process.env.WHATSAPP_SITE_NUMBER || "+27638018790";
 const WHATSAPP_BRIDGE_URL = (process.env.WHATSAPP_BRIDGE_URL || "https://meta-social-hub.healthyfieldssa.workers.dev").replace(/\/$/, "");
 
-// Outbound sending goes exclusively through the central Cloudflare bridge.
+// Outbound WhatsApp. Preferred path is direct to Meta's Graph API; the Cloudflare
+// bridge is only a fallback for as long as no Meta token is stored.
+async function graphSendWhatsApp(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!META_WHATSAPP_TOKEN) throw new Error("META_WHATSAPP_TOKEN is not configured");
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  return externalJson(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${META_WHATSAPP_TOKEN}` },
+    body: JSON.stringify({ messaging_product: "whatsapp", ...payload }),
+  });
+}
+
 async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
+  const payload = { to: toNumber, type: "text", text: { body: text } };
+  if (META_WHATSAPP_TOKEN) {
+    try {
+      await graphSendWhatsApp(payload);
+      return;
+    } catch (error) {
+      console.error("WhatsApp direct send failed, falling back to bridge", error instanceof Error ? error.message : error);
+    }
+  }
   const siteKey = process.env.WHATSAPP_SITE_KEY;
   if (!siteKey) return;
   try {
     await externalJson(`${WHATSAPP_BRIDGE_URL}/api/whatsapp/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-whatsapp-site-key": siteKey },
-      body: JSON.stringify({ number: WHATSAPP_SITE_NUMBER, payload: { messaging_product: "whatsapp", to: toNumber, type: "text", text: { body: text } } }),
+      body: JSON.stringify({ number: WHATSAPP_SITE_NUMBER, payload: { messaging_product: "whatsapp", ...payload } }),
     });
   } catch (error) {
     console.error("WhatsApp outbound send failed", error instanceof Error ? error.message : error);
   }
+}
+
+// Template send for messaging outside the 24-hour customer-service window.
+async function sendWhatsAppTemplate(toNumber: string, templateName: string, languageCode = "en", bodyParams: string[] = []): Promise<void> {
+  const components = bodyParams.length ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] : [];
+  await graphSendWhatsApp({ to: toNumber, type: "template", template: { name: templateName, language: { code: languageCode }, components } });
 }
 
 // WhatsApp Business Hours: only auto-reply between 07:00 and 17:00 SAST (UTC+2).
@@ -2276,13 +2311,13 @@ function withinWhatsAppBusinessHours(): boolean {
 }
 
 // AI-staffed WhatsApp reply: grounded in this site's catalog, shipping, payments and policies.
-async function aiWhatsAppReply(customerMessage: string): Promise<string> {
+async function aiWhatsAppReply(customerMessage: string, channel = "WhatsApp"): Promise<string> {
   let catalog = "";
   try {
     const rows = await query<RowDataPacket[]>("SELECT name, price_zar, short_description FROM products WHERE is_active = 1 AND (status = 'published' OR status IS NULL) ORDER BY is_featured DESC, id ASC LIMIT 25");
     catalog = (rows as RowDataPacket[]).map((r) => `- ${r.name}: R${Number(r.price_zar)} — ${String(r.short_description || "").slice(0, 120)}`).join("\n");
   } catch { catalog = "Catalog unavailable."; }
-  const systemPrompt = `You are the AI customer-care agent for Wonderful Dragon Fruit South Africa (DFSA), replying on WhatsApp. Business rules:
+  const systemPrompt = `You are the AI customer-care agent for Wonderful Dragon Fruit South Africa (DFSA), replying on ${channel}. Business rules:
 - Professional, friendly, concise WhatsApp style. Reply in the customer's language.
 - NEVER promise delivery dates, stock, or outcomes. Never offer refunds or free shipping. Never accept responsibility for customer or third-party mistakes.
 - Payments accepted: PayFast, Yoco, PayPal. Shipping: PUDO locker collection or The Courier Guy door-to-door across South Africa; international/export quotes via WhatsApp to Head Office +27 83 447 4639.
@@ -2403,6 +2438,187 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
   } catch (error) {
     console.error("WhatsApp webhook error", error instanceof Error ? error.message : error);
     return res.json({ received: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Direct Meta integration: Facebook Page messages and comments arrive straight
+// at this server (no Cloudflare Worker in the path) and are answered in place.
+// ---------------------------------------------------------------------------
+
+function metaSignatureValid(req: Request): boolean {
+  if (!META_APP_SECRET) return true; // nothing to verify against yet
+  const header = String(req.header("x-hub-signature-256") || "");
+  if (!header.startsWith("sha256=")) return false;
+  const raw = (req as Request & { rawBody?: Buffer }).rawBody;
+  if (!raw) return false;
+  const expected = crypto.createHmac("sha256", META_APP_SECRET).update(raw).digest("hex");
+  const received = header.slice(7);
+  if (expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+}
+
+async function replyFacebookComment(commentId: string, message: string) {
+  if (!commentId) throw new Error("A comment id is required");
+  return metaRequest(`${commentId}/comments`, { message });
+}
+
+app.get("/api/webhooks/facebook", (req, res) => {
+  const mode = String(req.query["hub.mode"] || "");
+  const token = String(req.query["hub.verify_token"] || "");
+  const challenge = String(req.query["hub.challenge"] || "");
+  if (mode === "subscribe" && META_WEBHOOK_VERIFY_TOKEN && token === META_WEBHOOK_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).json(apiError("Facebook verification failed", "WEBHOOK_UNAUTHORIZED", 403));
+});
+
+app.post("/api/webhooks/facebook", async (req, res) => {
+  if (!metaSignatureValid(req)) {
+    return res.status(401).json(apiError("Facebook signature verification failed", "WEBHOOK_UNAUTHORIZED", 401));
+  }
+  const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
+  try {
+    const payload = (req.body && typeof req.body === "object") ? req.body as Record<string, unknown> : {};
+    const entries = Array.isArray(payload.entry) ? payload.entry as Record<string, unknown>[] : [];
+    for (const entry of entries) {
+      // --- Messenger conversations ---
+      const messaging = Array.isArray(entry.messaging) ? entry.messaging as Record<string, unknown>[] : [];
+      for (const event of messaging) {
+        const sender = String((event.sender as Record<string, unknown> | undefined)?.id || "");
+        const recipient = String((event.recipient as Record<string, unknown> | undefined)?.id || "");
+        const message = (event.message && typeof event.message === "object") ? event.message as Record<string, unknown> : {};
+        const mid = String(message.mid || "");
+        const text = String(message.text || "").trim();
+        const isEcho = Boolean(message.is_echo);
+        if (!sender || !mid) continue;
+        const dup = await query<RowDataPacket[]>("SELECT id FROM facebook_messages WHERE mid = ? LIMIT 1", [mid]);
+        if (dup.length) continue;
+        await query(
+          "INSERT INTO facebook_messages (id, mid, direction, sender_id, recipient_id, message_content, status, raw_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+          [crypto.randomUUID(), mid, isEcho ? "outbound" : "inbound", sender, recipient, text || null, isEcho ? "sent" : "received", JSON.stringify(event)],
+        );
+        if (!isEcho && sender) {
+          try {
+            const existing = await query<RowDataPacket[]>("SELECT id FROM facebook_contacts WHERE psid = ? LIMIT 1", [sender]);
+            if (existing.length) {
+              await query("UPDATE facebook_contacts SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE psid = ?", [text.slice(0, 500), sender]);
+            } else {
+              await query("INSERT INTO facebook_contacts (id, psid, name, last_message) VALUES (?, ?, ?, ?)", [crypto.randomUUID(), sender, sender, text.slice(0, 500)]);
+            }
+          } catch (contactError) {
+            console.warn("Facebook contact upsert failed", contactError instanceof Error ? contactError.message : contactError);
+          }
+        }
+        // Auto-answer the customer on Messenger, outside the request cycle.
+        if (!isEcho && text && sender) {
+          void (async () => {
+            try {
+              const reply = withinWhatsAppBusinessHours()
+                ? await aiWhatsAppReply(text, "Facebook Messenger")
+                : "Thank you for contacting Wonderful Dragon Fruit South Africa! Our office replies between 07:00 and 17:00 SAST. For urgent help, WhatsApp Head Office on +27 83 447 4639.";
+              await metaSendMessage("facebook", sender, reply);
+              await query("INSERT INTO facebook_messages (id, mid, direction, sender_id, recipient_id, message_content, status, created_at) VALUES (?, ?, 'outbound', ?, ?, ?, 'sent', CURRENT_TIMESTAMP)",
+                [crypto.randomUUID(), `out-${crypto.randomUUID()}`, pageId, sender, reply]);
+            } catch (e) {
+              console.error("Facebook auto-reply failed", e instanceof Error ? e.message : e);
+            }
+          })();
+        }
+      }
+      // --- Page comments ---
+      const changes = Array.isArray(entry.changes) ? entry.changes as Record<string, unknown>[] : [];
+      for (const change of changes) {
+        if (String(change.field || "") !== "feed") continue;
+        const value = (change.value && typeof change.value === "object") ? change.value as Record<string, unknown> : {};
+        if (String(value.item || "") !== "comment" || String(value.verb || "") !== "add") continue;
+        const commentId = String(value.comment_id || value.id || "");
+        const postId = String(value.post_id || "");
+        const from = (value.from && typeof value.from === "object") ? value.from as Record<string, unknown> : {};
+        const authorId = String(from.id || "");
+        const authorName = String(from.name || "");
+        const content = String(value.message || "").trim();
+        if (!commentId) continue;
+        if (authorId && pageId && authorId === pageId) continue; // our own reply
+        const dup = await query<RowDataPacket[]>("SELECT id FROM facebook_comments WHERE comment_id = ? LIMIT 1", [commentId]);
+        if (dup.length) continue;
+        await query(
+          "INSERT INTO facebook_comments (id, comment_id, post_id, author_id, author_name, content, status, raw_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, 'received', ?, CURRENT_TIMESTAMP)",
+          [crypto.randomUUID(), commentId, postId, authorId, authorName, content, JSON.stringify(value)],
+        );
+        if (content) {
+          void (async () => {
+            try {
+              const reply = withinWhatsAppBusinessHours()
+                ? await aiWhatsAppReply(content, "Facebook comment reply")
+                : "Thank you for your comment! Our team replies between 07:00 and 17:00 SAST — for urgent help please WhatsApp +27 83 447 4639.";
+              const posted = await replyFacebookComment(commentId, reply);
+              await query("UPDATE facebook_comments SET reply_id = ?, reply_content = ?, status = 'replied' WHERE comment_id = ?",
+                [String(posted.id || ""), reply, commentId]);
+            } catch (e) {
+              console.error("Facebook comment auto-reply failed", e instanceof Error ? e.message : e);
+              await query("UPDATE facebook_comments SET status = 'reply_failed' WHERE comment_id = ?", [commentId]);
+            }
+          })();
+        }
+      }
+    }
+    return res.json({ received: true });
+  } catch (error) {
+    console.error("Facebook webhook error", error instanceof Error ? error.message : error);
+    return res.json({ received: true });
+  }
+});
+
+// Admin: stored comments plus a manual reply route.
+app.get("/api/admin/facebook/comments", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
+    const rows = await query<RowDataPacket[]>(
+      "SELECT comment_id, post_id, author_id, author_name, content, reply_content, status, created_at FROM facebook_comments ORDER BY created_at DESC LIMIT ?",
+      [limit],
+    );
+    return res.json({ data: rows, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not load comments", "FACEBOOK_COMMENTS_ERROR", 500));
+  }
+});
+
+app.post("/api/admin/facebook/comments/reply", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const commentId = String((req.body || {}).commentId || "");
+    const message = String((req.body || {}).message || "").trim();
+    if (!commentId || !message) return res.status(400).json(apiError("commentId and message are required", "INVALID_INPUT", 400));
+    const posted = await replyFacebookComment(commentId, message);
+    await query("UPDATE facebook_comments SET reply_id = ?, reply_content = ?, status = 'replied' WHERE comment_id = ?", [String(posted.id || ""), message, commentId]);
+    return res.json({ data: { ok: true, replyId: posted.id || "" }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Reply failed", "FACEBOOK_REPLY_ERROR", 500));
+  }
+});
+
+// Admin: which Meta channel is wired in and how it is currently delivering.
+app.get("/api/admin/meta/status", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    return res.json({
+      data: {
+        facebookPageId: Boolean(process.env.FACEBOOK_PAGE_ID),
+        instagramId: Boolean(process.env.INSTAGRAM_ID),
+        graphToken: Boolean(process.env.FACEBOOK_GRAPH_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN),
+        appSecret: Boolean(META_APP_SECRET),
+        whatsappDirect: Boolean(META_WHATSAPP_TOKEN),
+        whatsappBridgeFallback: Boolean(process.env.WHATSAPP_SITE_KEY),
+        webhookVerifyToken: Boolean(META_WEBHOOK_VERIFY_TOKEN),
+        whatsappWebhook: "https://wonderfuldragonfruit.company/api/webhooks/whatsapp",
+        facebookWebhook: "https://wonderfuldragonfruit.company/api/webhooks/facebook",
+      },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Status failed", "META_STATUS_ERROR", 500));
   }
 });
 
