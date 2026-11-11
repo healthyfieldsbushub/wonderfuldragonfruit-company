@@ -2303,26 +2303,31 @@ async function bridgeSendWhatsAppText(toNumber: string, text: string): Promise<v
 async function bridgeSendWhatsAppTemplate(toNumber: string, templateName: string, languageCode: string, bodyParams: string[]): Promise<void> {
   const siteKey = process.env.WHATSAPP_SITE_KEY;
   if (!siteKey) throw new Error("WHATSAPP_SITE_KEY is not configured");
-  const components = bodyParams.length ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] : [];
-  const result = await externalJson<{ result?: { error?: { message?: string } }; error?: { message?: string } }>(`${WHATSAPP_BRIDGE_URL}/mcp`, {
+  // The worker's MCP tool expects components as a JSON string, and omitting the
+  // field entirely is the safest form when the template has no body parameters.
+  const components = bodyParams.length ? JSON.stringify([{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }]) : "";
+  const args: Record<string, unknown> = { phone_number_id: WHATSAPP_PHONE_NUMBER_ID, to: toNumber, template_name: templateName, language: languageCode };
+  if (components) args.components = components;
+  const response = await externalJson<{ result?: { content?: Array<{ text?: string }> }; error?: { message?: string } }>(`${WHATSAPP_BRIDGE_URL}/mcp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       "x-whatsapp-site-key": siteKey,
     },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: {
-        name: "whatsapp_send_template",
-        arguments: { phone_number_id: WHATSAPP_PHONE_NUMBER_ID, to: toNumber, template_name: templateName, language: languageCode, components },
-      },
-    }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "whatsapp_send_template", arguments: args } }),
   });
-  const failure = result?.result?.error?.message || result?.error?.message;
-  if (failure) throw new Error(failure);
+  if (response?.error?.message) throw new Error(response.error.message);
+  // The tool result arrives as a JSON string inside content[0].text.
+  const raw = response?.result?.content?.[0]?.text;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as { ok?: boolean; error?: string };
+      if (parsed.ok === false) throw new Error(parsed.error || "template send rejected by the worker");
+    } catch (parseError) {
+      if (parseError instanceof Error && parseError.message !== "Unexpected end of JSON input") throw parseError;
+    }
+  }
 }
 async function sendWhatsAppText(toNumber: string, text: string): Promise<void> {
   if (process.env.WHATSAPP_SITE_KEY) {
