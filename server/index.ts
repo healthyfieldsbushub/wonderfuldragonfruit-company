@@ -1168,10 +1168,20 @@ function enquiryNotifyRecipients(): string[] {
     .map((value) => value.trim())
     .filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
 }
-function metaPageAccessToken() {
-  const token = process.env.FACEBOOK_PAGE_ACCESS_TOKEN || process.env.FACEBOOK_GRAPH_TOKEN;
-  if (!token) throw new Error("Facebook/Instagram publishing is not configured in Manus Admin");
-  return token;
+// Each Facebook Page has its own access token. Tokens live in facebook_pages so
+// one website can run every Page; the environment token stays as the fallback.
+async function pageAccessTokenFor(pageId?: string) {
+  const id = String(pageId || process.env.FACEBOOK_PAGE_ID || "").trim();
+  if (id) {
+    try {
+      const rows = await query<RowDataPacket[]>("SELECT access_token FROM facebook_pages WHERE page_id = ? LIMIT 1", [id]);
+      const stored = String((rows as RowDataPacket[])[0]?.access_token || "").trim();
+      if (stored) return stored;
+    } catch { /* table not created yet - fall through */ }
+  }
+  const fallback = process.env.FACEBOOK_PAGE_ACCESS_TOKEN || process.env.FACEBOOK_GRAPH_TOKEN;
+  if (!fallback) throw new Error("Facebook Page token is not configured in Manus Admin");
+  return fallback;
 }
 
 function publicMediaUrl(value: unknown, fieldName: string) {
@@ -1188,8 +1198,8 @@ function metaUrl(pathname: string, query: Record<string, string> = {}) {
   return url.toString();
 }
 
-async function metaRequest(pathname: string, body?: Record<string, unknown>) {
-  const token = metaPageAccessToken();
+async function metaRequest(pathname: string, body?: Record<string, unknown>, pageId?: string) {
+  const token = await pageAccessTokenFor(pageId);
   return externalJson(metaUrl(pathname), {
     method: body ? "POST" : "GET",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -1197,8 +1207,8 @@ async function metaRequest(pathname: string, body?: Record<string, unknown>) {
   });
 }
 
-async function metaConversations(platform: "facebook" | "instagram"): Promise<Record<string, unknown>[]> {
-  const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
+async function metaConversations(platform: "facebook" | "instagram", pageIdOverride?: string): Promise<Record<string, unknown>[]> {
+  const pageId = String(pageIdOverride || process.env.FACEBOOK_PAGE_ID || "").trim();
   const instagramId = String(process.env.INSTAGRAM_ID || "").trim();
   const nodeId = platform === "instagram" ? instagramId : pageId;
   if (!nodeId) throw new Error(platform === "instagram" ? "Instagram Business account ID is not configured in Manus Admin" : "Facebook Page ID is not configured in Manus Admin");
@@ -1245,8 +1255,8 @@ async function metaConversationMessages(conversationId: string): Promise<Record<
   });
 }
 
-async function metaSendMessage(platform: "facebook" | "instagram", recipientId: string, text: string) {
-  const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
+async function metaSendMessage(platform: "facebook" | "instagram", recipientId: string, text: string, pageIdOverride?: string) {
+  const pageId = String(pageIdOverride || process.env.FACEBOOK_PAGE_ID || "").trim();
   const instagramId = String(process.env.INSTAGRAM_ID || "").trim();
   const nodeId = platform === "instagram" ? instagramId : pageId;
   if (!nodeId) throw new Error(platform === "instagram" ? "Instagram is not configured in Manus Admin" : "Facebook is not configured in Manus Admin");
@@ -1254,7 +1264,7 @@ async function metaSendMessage(platform: "facebook" | "instagram", recipientId: 
     recipient: { id: recipientId },
     messaging_type: "RESPONSE",
     message: { text },
-  });
+  }, pageId);
 }
 
 async function getSocialStatus() {
@@ -1273,17 +1283,17 @@ async function getSocialStatus() {
 }
 
 async function publishFacebookPage(body: Record<string, any>) {
-  const pageId = String(process.env.FACEBOOK_PAGE_ID || "").trim();
+  const pageId = String(body.pageId || process.env.FACEBOOK_PAGE_ID || "").trim();
   if (!pageId) throw new Error("Facebook Page ID is not configured in Manus Admin");
   const message = String(body.message || "").trim();
   const link = body.link ? publicMediaUrl(body.link, "Facebook link") : "";
   const imageUrl = body.imageUrl ? publicMediaUrl(body.imageUrl, "Facebook image URL") : "";
   if (!message && !link && !imageUrl) throw new Error("Add a message, link, or image before publishing");
   if (imageUrl) {
-    const result = await metaRequest(`${pageId}/photos`, { url: imageUrl, message, published: true });
+    const result = await metaRequest(`${pageId}/photos`, { url: imageUrl, message, published: true }, pageId);
     return { platform: "facebook", success: true, postId: result.post_id || result.id, result };
   }
-  const result = await metaRequest(`${pageId}/feed`, { message, ...(link ? { link } : {}), published: true });
+  const result = await metaRequest(`${pageId}/feed`, { message, ...(link ? { link } : {}), published: true }, pageId);
   return { platform: "facebook", success: true, postId: result.id, result };
 }
 
@@ -2458,9 +2468,9 @@ function metaSignatureValid(req: Request): boolean {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
 }
 
-async function replyFacebookComment(commentId: string, message: string) {
+async function replyFacebookComment(commentId: string, message: string, pageId?: string) {
   if (!commentId) throw new Error("A comment id is required");
-  return metaRequest(`${commentId}/comments`, { message });
+  return metaRequest(`${commentId}/comments`, { message }, pageId);
 }
 
 app.get("/api/webhooks/facebook", (req, res) => {
@@ -2482,6 +2492,8 @@ app.post("/api/webhooks/facebook", async (req, res) => {
     const payload = (req.body && typeof req.body === "object") ? req.body as Record<string, unknown> : {};
     const entries = Array.isArray(payload.entry) ? payload.entry as Record<string, unknown>[] : [];
     for (const entry of entries) {
+      // Every Page the website manages sends its own events; answer with that Page's token.
+      const entryPageId = String(entry.id || pageId || "").trim();
       // --- Messenger conversations ---
       const messaging = Array.isArray(entry.messaging) ? entry.messaging as Record<string, unknown>[] : [];
       for (const event of messaging) {
@@ -2517,9 +2529,9 @@ app.post("/api/webhooks/facebook", async (req, res) => {
               const reply = withinWhatsAppBusinessHours()
                 ? await aiWhatsAppReply(text, "Facebook Messenger")
                 : "Thank you for contacting Wonderful Dragon Fruit South Africa! Our office replies between 07:00 and 17:00 SAST. For urgent help, WhatsApp Head Office on +27 83 447 4639.";
-              await metaSendMessage("facebook", sender, reply);
+              await metaSendMessage("facebook", sender, reply, entryPageId);
               await query("INSERT INTO facebook_messages (id, mid, direction, sender_id, recipient_id, message_content, status, created_at) VALUES (?, ?, 'outbound', ?, ?, ?, 'sent', CURRENT_TIMESTAMP)",
-                [crypto.randomUUID(), `out-${crypto.randomUUID()}`, pageId, sender, reply]);
+                [crypto.randomUUID(), `out-${crypto.randomUUID()}`, entryPageId, sender, reply]);
             } catch (e) {
               console.error("Facebook auto-reply failed", e instanceof Error ? e.message : e);
             }
@@ -2539,7 +2551,7 @@ app.post("/api/webhooks/facebook", async (req, res) => {
         const authorName = String(from.name || "");
         const content = String(value.message || "").trim();
         if (!commentId) continue;
-        if (authorId && pageId && authorId === pageId) continue; // our own reply
+        if (authorId && entryPageId && authorId === entryPageId) continue; // our own reply
         const dup = await query<RowDataPacket[]>("SELECT id FROM facebook_comments WHERE comment_id = ? LIMIT 1", [commentId]);
         if (dup.length) continue;
         await query(
@@ -2552,7 +2564,7 @@ app.post("/api/webhooks/facebook", async (req, res) => {
               const reply = withinWhatsAppBusinessHours()
                 ? await aiWhatsAppReply(content, "Facebook comment reply")
                 : "Thank you for your comment! Our team replies between 07:00 and 17:00 SAST — for urgent help please WhatsApp +27 83 447 4639.";
-              const posted = await replyFacebookComment(commentId, reply);
+              const posted = await replyFacebookComment(commentId, reply, entryPageId);
               await query("UPDATE facebook_comments SET reply_id = ?, reply_content = ?, status = 'replied' WHERE comment_id = ?",
                 [String(posted.id || ""), reply, commentId]);
             } catch (e) {
@@ -2596,6 +2608,60 @@ app.post("/api/admin/facebook/comments/reply", async (req, res) => {
     return res.json({ data: { ok: true, replyId: posted.id || "" }, error: null });
   } catch (error) {
     return res.status(500).json(apiError(error instanceof Error ? error.message : "Reply failed", "FACEBOOK_REPLY_ERROR", 500));
+  }
+});
+
+// Admin: the Facebook Pages this website manages. Tokens are never returned.
+app.get("/api/admin/facebook/pages", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const rows = await query<RowDataPacket[]>(
+      "SELECT page_id, name, is_primary, subscribed, created_at, updated_at FROM facebook_pages ORDER BY is_primary DESC, name ASC",
+    );
+    return res.json({ data: rows, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not load pages", "FACEBOOK_PAGES_ERROR", 500));
+  }
+});
+
+app.post("/api/admin/facebook/pages", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const body = (req.body || {}) as Record<string, unknown>;
+    const pageId = String(body.pageId || "").trim();
+    const name = String(body.name || "").trim();
+    const token = String(body.accessToken || "").trim();
+    if (!pageId || !name || !token) return res.status(400).json(apiError("pageId, name and accessToken are required", "INVALID_INPUT", 400));
+    const makePrimary = Boolean(body.isPrimary);
+    if (makePrimary) await query("UPDATE facebook_pages SET is_primary = 0");
+    await query(
+      "INSERT INTO facebook_pages (id, page_id, name, access_token, is_primary, subscribed) VALUES (?, ?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE name = VALUES(name), access_token = VALUES(access_token), is_primary = VALUES(is_primary), subscribed = 1",
+      [crypto.randomUUID(), pageId, name, token, makePrimary ? 1 : 0],
+    );
+    // Confirm the token works before trusting it.
+    let verified = false;
+    let verifyError = "";
+    try {
+      const check = await metaRequest(pageId, undefined, pageId);
+      verified = Boolean(check && check.id);
+    } catch (error) {
+      verifyError = error instanceof Error ? error.message : "verification failed";
+    }
+    return res.json({ data: { ok: true, pageId, verified, verifyError }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not save page", "FACEBOOK_PAGE_SAVE_ERROR", 500));
+  }
+});
+
+app.delete("/api/admin/facebook/pages", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) return res.status(401).json(apiError("Admin authentication is required", "ADMIN_AUTH_REQUIRED", 401));
+    const pageId = String((req.query.pageId || (req.body || {}).pageId || "")).trim();
+    if (!pageId) return res.status(400).json(apiError("pageId is required", "INVALID_INPUT", 400));
+    await query("DELETE FROM facebook_pages WHERE page_id = ?", [pageId]);
+    return res.json({ data: { ok: true }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not remove page", "FACEBOOK_PAGE_DELETE_ERROR", 500));
   }
 });
 
