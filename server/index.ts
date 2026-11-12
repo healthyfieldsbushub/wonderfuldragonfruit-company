@@ -388,7 +388,7 @@ const BRIDGE_TABLES = {
     conflict: "slug",
   },
   orders: {
-    columns: ["id", "order_number", "customer_id", "guest_email", "status", "payment_status", "payment_method", "payment_reference", "subtotal_zar", "shipping_cost_zar", "discount_zar", "tax_zar", "total_zar", "currency", "shipping_method", "shipping_address", "billing_address", "notes", "tracking_number", "shipped_at", "delivered_at", "created_at", "updated_at"],
+    columns: ["id", "order_number", "customer_id", "guest_email", "status", "payment_status", "payment_method", "payment_reference", "subtotal_zar", "shipping_cost_zar", "discount_zar", "tax_zar", "total_zar", "currency", "promo_code", "shipping_method", "shipping_address", "billing_address", "notes", "tracking_number", "shipped_at", "delivered_at", "created_at", "updated_at"],
     writable: ["status", "tracking_number", "shipped_at", "delivered_at", "notes"],
     conflict: "order_number",
   },
@@ -2206,6 +2206,33 @@ function selectQuotedRate(rates: { provider: string; service: string; price: num
   return partial || null;
 }
 
+/**
+ * Quote shipping for an order, retrying transient carrier failures.
+ *
+ * A single dropped connection to a carrier used to remove that carrier's services
+ * from the quote, which then failed the order because the customer's chosen
+ * service had vanished. Two extra attempts smooth over those blips.
+ */
+async function quoteOrderShipping(parcel: { weightKg: number; lengthCm: number; widthCm: number; heightCm: number }, deliveryAddress: unknown) {
+  const empty = { rates: [] as { provider: string; service: string; price: number }[], notices: [] as string[], chargeableKg: 0, volumetricKg: 0 };
+  let last: typeof empty = empty;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const quote = await fetchShippingRates({
+        weight: parcel.weightKg,
+        dimensions: { length: parcel.lengthCm, width: parcel.widthCm, height: parcel.heightCm },
+        deliveryAddress: deliveryAddress || {},
+      });
+      if (quote.rates.length) return quote;
+      last = quote as typeof empty;
+    } catch (error) {
+      console.warn(`Order shipping re-quote attempt ${attempt} failed`, error instanceof Error ? error.message : String(error));
+    }
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+  }
+  return last;
+}
+
 async function createOrderFromCart(body: Record<string, any>) {
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) throw new Error("Order must contain at least one item");
@@ -2228,31 +2255,38 @@ async function createOrderFromCart(body: Record<string, any>) {
   // shippingCost: 0 and take free shipping, which this business never offers.
   const parcel = parcelForOrderLines(normalized);
   const requestedService = String(body.shippingMethod || "").trim();
-  const quote = await fetchShippingRates({
-    weight: parcel.weightKg,
-    dimensions: { length: parcel.lengthCm, width: parcel.widthCm, height: parcel.heightCm },
-    deliveryAddress: body.shippingAddress || {},
-  }).catch((error) => {
-    console.warn("Order shipping re-quote failed", error instanceof Error ? error.message : String(error));
-    return { rates: [] as { provider: string; service: string; price: number }[], notices: [] as string[], chargeableKg: 0, volumetricKg: 0 };
-  });
-  const chosenRate = selectQuotedRate(quote.rates, requestedService);
-  if (!chosenRate) {
+  const quote = await quoteOrderShipping(parcel, body.shippingAddress);
+  if (!quote.rates.length) {
     // Fail closed. Charging nothing for delivery would breach the no-free-shipping
     // policy, and inventing a figure would misquote the customer, so the order is
     // declined with an actionable message instead.
-    throw new Error("We could not confirm a delivery price for this address right now. Please check the delivery details and try again.");
+    throw new Error("We could not reach the delivery carriers just now. Please try again in a moment.");
+  }
+  const chosenRate = selectQuotedRate(quote.rates, requestedService);
+  if (!chosenRate) {
+    // The customer's chosen option is not on the current quote, so the price they
+    // saw cannot be honoured. Substituting a different rate would let someone pay
+    // a locker price while expecting door delivery, so the order is declined and
+    // the customer is asked to re-select.
+    throw new Error("The delivery option you chose is no longer available for this address. Please re-select shipping and try again.");
   }
   const shipping = Math.max(0, Number(chosenRate.price));
   // The discount is resolved from the promo code here on the server. A discount
   // supplied by the browser is deliberately ignored, so a tampered request cannot
   // reduce the amount owed.
   const promo = body.promoCode ? await resolvePromoCode(String(body.promoCode), subtotal) : null;
+  if (promo && !promo.valid) {
+    // The customer applied a code that stopped qualifying between the checkout
+    // rendering and this submission (it expired, hit its cap, or was deactivated).
+    // Quietly charging the full price would take more than the page displayed, so
+    // the order is declined and the reason surfaced instead.
+    throw new Error(promo.message || "That promo code is no longer valid");
+  }
   const discount = promo && promo.valid ? promo.discount_amount : 0;
   const total = Math.max(0, subtotal + shipping - discount);
   const orderId = crypto.randomUUID();
   const orderNumber = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, String(chosenRate.service || requestedService || "standard"), JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
+  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, promo_code, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, promo && promo.valid ? promo.code : null, String(chosenRate.service || requestedService || "standard"), JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
   for (const line of normalized) await query<ResultSetHeader>("INSERT INTO order_items (id, order_id, product_id, product_name, product_sku, quantity, unit_price_zar, total_price_zar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), orderId, line.product.id, line.product.name, line.product.sku, line.quantity, line.unit, line.unit * line.quantity]);
   // Count the redemption only once the order exists, so abandoned carts do not
   // consume a limited code.
@@ -3935,6 +3969,135 @@ const requireInvoiceAdmin = async (req: Request, res: Response) => {
   res.status(401).json({ error: "Admin authentication required" });
   return false;
 };
+
+// ---------------------------------------------------------------------------
+// Promo code management (admin only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Live redemption dashboard for the admin promo panel.
+ *
+ * Redemption counts come from the orders table rather than only from
+ * promo_codes.current_uses, so the figures are auditable and can be broken down
+ * by day and by code. Orders created before promo_code existed were backfilled
+ * from their note by migration 018.
+ */
+app.get("/api/admin/promo-analytics", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const codes = await query<RowDataPacket[]>(
+      `SELECT code, description, discount_type, discount_value, min_order_zar,
+              max_uses, current_uses, is_active, starts_at, expires_at, created_at
+       FROM promo_codes ORDER BY created_at DESC`,
+    );
+    const totals = await query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS redemptions,
+              COALESCE(SUM(discount_zar), 0) AS discount_given,
+              COALESCE(SUM(total_zar), 0) AS revenue
+       FROM orders WHERE promo_code IS NOT NULL AND promo_code <> ''`,
+    );
+    const perCode = await query<RowDataPacket[]>(
+      `SELECT UPPER(promo_code) AS code,
+              COUNT(*) AS redemptions,
+              COALESCE(SUM(discount_zar), 0) AS discount_given,
+              COALESCE(SUM(total_zar), 0) AS revenue,
+              MAX(created_at) AS last_used
+       FROM orders WHERE promo_code IS NOT NULL AND promo_code <> ''
+       GROUP BY UPPER(promo_code)`,
+    );
+    // 30 days of trend, zero-filled below so the chart has no gaps.
+    const daily = await query<RowDataPacket[]>(
+      `SELECT DATE(created_at) AS day, COUNT(*) AS redemptions, COALESCE(SUM(discount_zar), 0) AS discount_given
+       FROM orders
+       WHERE promo_code IS NOT NULL AND promo_code <> ''
+         AND created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+       GROUP BY DATE(created_at) ORDER BY day`,
+    );
+    const today = await query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS redemptions FROM orders
+       WHERE promo_code IS NOT NULL AND promo_code <> '' AND DATE(created_at) = CURDATE()`,
+    );
+    const trend = new Map<string, { redemptions: number; discount_given: number }>();
+    for (const row of daily) {
+      const key = row.day instanceof Date ? row.day.toISOString().slice(0, 10) : String(row.day).slice(0, 10);
+      trend.set(key, { redemptions: Number(row.redemptions) || 0, discount_given: Number(row.discount_given) || 0 });
+    }
+    const series: { day: string; redemptions: number; discount_given: number }[] = [];
+    for (let i = 29; i >= 0; i -= 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      series.push({ day: key, ...(trend.get(key) || { redemptions: 0, discount_given: 0 }) });
+    }
+    res.json({
+      codes,
+      totals: totals[0] || { redemptions: 0, discount_given: 0, revenue: 0 },
+      today: Number(today[0]?.redemptions) || 0,
+      perCode,
+      series,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load promo analytics" });
+  }
+});
+
+/**
+ * Create many codes in one action, all sharing the same rules.
+ * Codes that already exist are reported back rather than failing the whole batch,
+ * so re-running a batch is harmless.
+ */
+app.post("/api/admin/promo-codes/bulk", async (req, res) => {
+  if (!(await requireInvoiceAdmin(req, res))) return;
+  try {
+    const body = (req.body || {}) as Record<string, any>;
+    const requested: string[] = Array.isArray(body.codes)
+      ? body.codes.map((c: unknown) => String(c || "").trim().toUpperCase()).filter(Boolean)
+      : [];
+    if (!requested.length) return res.status(400).json({ error: "Provide at least one promo code" });
+    if (requested.length > 500) return res.status(400).json({ error: "Create at most 500 codes at once" });
+
+    const discountType = String(body.discount_type || "fixed") === "percentage" ? "percentage" : "fixed";
+    const discountValue = Number(body.discount_value);
+    if (!Number.isFinite(discountValue) || discountValue <= 0) {
+      return res.status(400).json({ error: "Discount value must be greater than zero" });
+    }
+    const minOrder = Number(body.min_order_zar) > 0 ? Number(body.min_order_zar) : 0;
+    const maxUses = Number(body.max_uses) > 0 ? Math.floor(Number(body.max_uses)) : null;
+    const startsAt = body.starts_at ? new Date(String(body.starts_at)) : null;
+    const expiresAt = body.expires_at ? new Date(String(body.expires_at)) : null;
+    const description = body.description ? String(body.description) : null;
+    const isActive = body.is_active === undefined ? true : Boolean(body.is_active);
+
+    // Deduplicate within the request as well as against the database.
+    const unique = Array.from(new Set(requested));
+    const existing = await query<RowDataPacket[]>(
+      `SELECT UPPER(code) AS code FROM promo_codes WHERE UPPER(code) IN (${unique.map(() => "?").join(",")})`,
+      unique,
+    );
+    const taken = new Set(existing.map((r) => String(r.code).toUpperCase()));
+    const created: string[] = [];
+    const skipped: string[] = Array.from(taken);
+    const invalid: string[] = [];
+    const CODE_PATTERN = /^[A-Z0-9][A-Z0-9_-]{2,60}$/;
+
+    for (const code of unique) {
+      if (taken.has(code)) continue;
+      if (!CODE_PATTERN.test(code)) {
+        invalid.push(code);
+        continue;
+      }
+      await query(
+        `INSERT INTO promo_codes (code, description, discount_type, discount_value, min_order_zar, max_uses, starts_at, expires_at, is_active, current_uses)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+        [code, description, discountType, discountValue, minOrder, maxUses, startsAt, expiresAt, isActive ? 1 : 0],
+      );
+      created.push(code);
+    }
+    res.json({ created, createdCount: created.length, skipped, invalid });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create promo codes" });
+  }
+});
 
 app.get("/api/admin/invoices", async (req, res) => {
   if (!(await requireInvoiceAdmin(req, res))) return;
