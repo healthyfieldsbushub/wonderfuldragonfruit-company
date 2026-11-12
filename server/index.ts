@@ -2160,12 +2160,58 @@ async function fetchPudoLockers(postalCode: string, search = "") {
   return all.filter((locker) => rank(locker) === 0).sort(byName).slice(0, 200);
 }
 
+/**
+ * Recompute a shipment's parcel from the products actually in the cart, using the
+ * same rules the checkout uses to display its quote. Keeping the two in step means
+ * the price the customer was shown is the price the server independently derives.
+ */
+function parcelForOrderLines(lines: { product: any; quantity: number }[]) {
+  let weightKg = 0;
+  let lengthCm = 30;
+  let widthCm = 20;
+  let heightCm = 15;
+  for (const line of lines) {
+    const p = line.product || {};
+    weightKg += (Number(p.weight_kg) || 0.5) * line.quantity;
+    const l = Number(p.length_cm) || 0;
+    const w = Number(p.width_cm) || 0;
+    const h = Number(p.height_cm) || 0;
+    if (l > lengthCm) lengthCm = l;
+    if (w > widthCm) widthCm = w;
+    if (h > heightCm) heightCm = h;
+  }
+  return { weightKg, lengthCm, widthCm, heightCm };
+}
+
+/**
+ * Pick the quoted rate matching the service the customer chose.
+ *
+ * A named service must actually be on the quote. Returning a substitute would let
+ * a customer pay a locker price while expecting door delivery, so an unmatched
+ * name yields null and the order is declined. When no service is named at all
+ * (an older client) the cheapest real quote is used, so shipping is never free.
+ */
+function selectQuotedRate(rates: { provider: string; service: string; price: number }[], requested: string) {
+  if (!rates.length) return null;
+  const want = String(requested || "").trim().toLowerCase();
+  if (!want) {
+    return rates.reduce((cheapest, r) => (Number(r.price) < Number(cheapest.price) ? r : cheapest), rates[0]);
+  }
+  const exact = rates.find((r) => String(r.service).trim().toLowerCase() === want);
+  if (exact) return exact;
+  const partial = rates.find((r) => {
+    const svc = String(r.service).trim().toLowerCase();
+    return svc.includes(want) || want.includes(svc);
+  });
+  return partial || null;
+}
+
 async function createOrderFromCart(body: Record<string, any>) {
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) throw new Error("Order must contain at least one item");
   const ids = items.map((item: any) => String(item.productId || ""));
   const placeholders = ids.map(() => "?").join(",");
-  const products = await query<RowDataPacket[]>(`SELECT id, sku, name, price_zar, stock_quantity, allow_backorder FROM products WHERE id IN (${placeholders}) AND is_active = 1`, ids);
+  const products = await query<RowDataPacket[]>(`SELECT id, sku, name, price_zar, stock_quantity, allow_backorder, weight_kg, length_cm, width_cm, height_cm FROM products WHERE id IN (${placeholders}) AND is_active = 1`, ids);
   const byId = new Map(products.map((product) => [String(product.id), product]));
   let subtotal = 0;
   const normalized = items.map((item: any) => {
@@ -2177,7 +2223,27 @@ async function createOrderFromCart(body: Record<string, any>) {
     subtotal += unit * quantity;
     return { product, quantity, unit };
   });
-  const shipping = Math.max(0, Number(body.shippingCost || 0));
+  // Shipping is re-quoted here rather than read from the request. The browser's
+  // shippingCost is a display value only: trusting it let a tampered request send
+  // shippingCost: 0 and take free shipping, which this business never offers.
+  const parcel = parcelForOrderLines(normalized);
+  const requestedService = String(body.shippingMethod || "").trim();
+  const quote = await fetchShippingRates({
+    weight: parcel.weightKg,
+    dimensions: { length: parcel.lengthCm, width: parcel.widthCm, height: parcel.heightCm },
+    deliveryAddress: body.shippingAddress || {},
+  }).catch((error) => {
+    console.warn("Order shipping re-quote failed", error instanceof Error ? error.message : String(error));
+    return { rates: [] as { provider: string; service: string; price: number }[], notices: [] as string[], chargeableKg: 0, volumetricKg: 0 };
+  });
+  const chosenRate = selectQuotedRate(quote.rates, requestedService);
+  if (!chosenRate) {
+    // Fail closed. Charging nothing for delivery would breach the no-free-shipping
+    // policy, and inventing a figure would misquote the customer, so the order is
+    // declined with an actionable message instead.
+    throw new Error("We could not confirm a delivery price for this address right now. Please check the delivery details and try again.");
+  }
+  const shipping = Math.max(0, Number(chosenRate.price));
   // The discount is resolved from the promo code here on the server. A discount
   // supplied by the browser is deliberately ignored, so a tampered request cannot
   // reduce the amount owed.
@@ -2186,7 +2252,7 @@ async function createOrderFromCart(body: Record<string, any>) {
   const total = Math.max(0, subtotal + shipping - discount);
   const orderId = crypto.randomUUID();
   const orderNumber = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, body.shippingMethod || "standard", JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
+  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, String(chosenRate.service || requestedService || "standard"), JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
   for (const line of normalized) await query<ResultSetHeader>("INSERT INTO order_items (id, order_id, product_id, product_name, product_sku, quantity, unit_price_zar, total_price_zar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), orderId, line.product.id, line.product.name, line.product.sku, line.quantity, line.unit, line.unit * line.quantity]);
   // Count the redemption only once the order exists, so abandoned carts do not
   // consume a limited code.
