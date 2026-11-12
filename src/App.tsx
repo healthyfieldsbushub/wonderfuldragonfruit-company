@@ -39,6 +39,7 @@ const AdminProductAudit = lazy(() => import("./pages/admin/ProductAudit"));
 const AdminApiIntegrations = lazy(() => import("./pages/admin/ApiIntegrations"));
 const AdminAIMarketing = lazy(() => import("./pages/admin/AIMarketing"));
 const AdminInvoices = lazy(() => import("./pages/admin/Invoices"));
+const AdminDigitalDownloads = lazy(() => import("./pages/admin/DigitalDownloads"));
 const AdminCategories = lazy(() => import("./pages/admin/Categories"));
 const AdminOrders = lazy(() => import("./pages/admin/Orders"));
 const AdminCustomers = lazy(() => import("./pages/admin/Customers"));
@@ -243,6 +244,7 @@ const App = () => (
                 <Route path="api-integrations" element={<AdminApiIntegrations />} />
                 <Route path="ai-marketing" element={<AdminAIMarketing />} />
                 <Route path="invoices" element={<AdminInvoices />} />
+                <Route path="digital-downloads" element={<AdminDigitalDownloads />} />
                 <Route path="categories" element={<AdminCategories />} />
                 <Route path="orders" element={<AdminOrders />} />
                 <Route path="customers" element={<AdminCustomers />} />

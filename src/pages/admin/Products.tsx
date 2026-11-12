@@ -83,6 +83,15 @@ interface ProductForm {
   is_special_of_month: boolean;
   promo_start_date: string;
   promo_end_date: string;
+  // Digital download (ebook): the product ships nothing, so it is never charged
+  // shipping. The file is uploaded to private storage and delivered by token.
+  is_digital: boolean;
+  digital_file_key: string;
+  digital_file_name: string;
+  digital_file_size: string;
+  digital_file_format: string;
+  digital_download_limit: string;
+  digital_expiry_days: string;
   variants: ProductVariantForm[];
 }
 
@@ -131,6 +140,8 @@ const emptyForm: ProductForm = {
   primary_image_url: '', images: [], image_alt_texts: [], image_metadata: [],
   status: 'draft', is_featured: false, promo_start_date: '', promo_end_date: '',
   is_special_of_month: false,
+  is_digital: false, digital_file_key: '', digital_file_name: '', digital_file_size: '',
+  digital_file_format: '', digital_download_limit: '5', digital_expiry_days: '365',
   variants: [],
 };
 
@@ -173,6 +184,9 @@ export default function AdminProducts() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [isGenerating, setIsGenerating] = useState(false);
+  // Digital download upload (ebook). The file goes to private storage; only the
+  // storage key is kept on the product, never a public URL.
+  const [uploadingDigital, setUploadingDigital] = useState(false);
   const [listFilter, setListFilter] = useState<'all' | 'published' | 'draft' | 'missing-shipping'>('all');
   const [search, setSearch] = useState('');
   const [csvOpen, setCsvOpen] = useState(false);
@@ -359,6 +373,15 @@ export default function AdminProducts() {
         is_special_of_month: data.is_special_of_month,
         promo_start_date: data.promo_start_date || null,
         promo_end_date: data.promo_end_date || null,
+        is_digital: data.is_digital,
+        digital_file_key: data.digital_file_key || null,
+        digital_file_name: data.digital_file_name || null,
+        digital_file_size: data.digital_file_size ? parseInt(data.digital_file_size) : null,
+        digital_file_format: data.digital_file_format || null,
+        digital_download_limit: parseInt(data.digital_download_limit) || 5,
+        digital_expiry_days: parseInt(data.digital_expiry_days) || 365,
+        // A digital product has nothing to ship, so stale parcel data is cleared.
+        ...(data.is_digital ? { weight_kg: null, length_cm: null, width_cm: null, height_cm: null } : {}),
       };
 
       if (editingId) {
@@ -530,6 +553,13 @@ export default function AdminProducts() {
       packed_length_cm: product.packed_length_cm?.toString() || '',
       packed_width_cm: product.packed_width_cm?.toString() || '',
       packed_height_cm: product.packed_height_cm?.toString() || '',
+      is_digital: Boolean((product as unknown as { is_digital?: number }).is_digital),
+      digital_file_key: String((product as unknown as { digital_file_key?: string }).digital_file_key || ''),
+      digital_file_name: String((product as unknown as { digital_file_name?: string }).digital_file_name || ''),
+      digital_file_size: String((product as unknown as { digital_file_size?: number }).digital_file_size || ''),
+      digital_file_format: String((product as unknown as { digital_file_format?: string }).digital_file_format || ''),
+      digital_download_limit: String((product as unknown as { digital_download_limit?: number }).digital_download_limit || 5),
+      digital_expiry_days: String((product as unknown as { digital_expiry_days?: number }).digital_expiry_days ?? 365),
       meta_title: product.meta_title || '',
       meta_description: product.meta_description || '',
       primary_image_url: product.primary_image_url || '',
@@ -564,13 +594,43 @@ export default function AdminProducts() {
     }
   };
 
+  const handleDigitalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDigital(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch('/api/admin/digital/upload', { method: 'POST', body, credentials: 'include' });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error?.message || 'Upload failed');
+      setForm((f) => ({
+        ...f,
+        digital_file_key: json.data.fileKey,
+        digital_file_name: json.data.fileName,
+        digital_file_size: String(json.data.fileSize),
+        digital_file_format: json.data.fileFormat || 'pdf',
+      }));
+      toast.success('Download file uploaded. Remember to save the product.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploadingDigital(false);
+      e.target.value = '';
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.sku || !form.price_zar) {
       toast.error('Name, SKU and price are required.');
       return;
     }
-    if (form.status === 'published' && (!form.weight_kg || !form.length_cm || !form.width_cm || !form.height_cm)) {
+    if (form.is_digital && !form.digital_file_key) {
+      toast.error('Upload the download file before saving a digital product.');
+      return;
+    }
+    if (!form.is_digital && form.status === 'published' && (!form.weight_kg || !form.length_cm || !form.width_cm || !form.height_cm)) {
       toast.error('A product needs weight and dimensions (Shipping section) before it can be published.');
       return;
     }
@@ -844,6 +904,71 @@ export default function AdminProducts() {
                 </label>
               </Section>
 
+              <Section title="Digital download (ebook)">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded"
+                    checked={form.is_digital}
+                    onChange={(e) => setForm({ ...form, is_digital: e.target.checked })}
+                  />
+                  <span>
+                    <span className="font-medium text-sm">This product is a digital download</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      A digital product ships nothing, so customers are never charged delivery for it.
+                      Once payment is confirmed they receive a personal download link by email.
+                    </span>
+                  </span>
+                </label>
+
+                {form.is_digital && (
+                  <div className="space-y-4 border-t pt-4">
+                    <Field
+                      label="Download file (PDF, EPUB or ZIP)"
+                      hint="Upload the finished ebook. Customers only ever receive a secure link, never the file location."
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="file"
+                          accept=".pdf,.epub,.zip,application/pdf,application/epub+zip,application/zip"
+                          onChange={handleDigitalUpload}
+                          disabled={uploadingDigital}
+                          className="text-sm"
+                        />
+                        {uploadingDigital && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                      </div>
+                    </Field>
+
+                    {form.digital_file_key ? (
+                      <p className="text-xs text-muted-foreground">
+                        Uploaded: <span className="font-medium">{form.digital_file_name || 'file'}</span>
+                        {form.digital_file_size ? ` (${(parseInt(form.digital_file_size) / 1048576).toFixed(2)} MB)` : ''}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-600">No file uploaded yet — a digital product cannot be saved without one.</p>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <Field label="Downloads allowed per purchase" hint="How many times one buyer may download this file. Default 5.">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={form.digital_download_limit}
+                          onChange={(e) => setForm({ ...form, digital_download_limit: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Link valid for (days)" hint="After this many days the link stops working. Default 365.">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={form.digital_expiry_days}
+                          onChange={(e) => setForm({ ...form, digital_expiry_days: e.target.value })}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                )}
+              </Section>
               <Section title="Shipping (required to publish)">
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <Field label="Weight (kg)" htmlFor="weight_kg" hint="Packed shipping weight, e.g. 0.8.">

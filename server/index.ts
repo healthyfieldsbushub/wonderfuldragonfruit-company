@@ -24,6 +24,18 @@ import {
   documentEmailBody,
   type DeliveryResult,
 } from "./documentDelivery";
+import {
+  DIGITAL_BUCKET,
+  issueDigitalEntitlements,
+  resolveDownload,
+  signedStorageUrl,
+  recordDownloadEvent,
+  incrementDownloadCount,
+  isAllDigitalCart,
+  digitalEmailBody,
+  publicOrigin,
+  type IssuedDownload,
+} from "./digital";
 import sharp from "sharp";
 import { configureOneMin, isOneMinConfigured, refreshModelCatalog, listCachedModels, getTaskAssignments, updateTaskAssignment, usageSummary, chatForTask, generateImage, getSettings, setSetting } from "./onemin";
 
@@ -353,10 +365,12 @@ const ADMIN_PASSWORD_ATTEMPTS = new Map<string, { started: number; count: number
 const BRIDGE_RATE = new Map<string, { started: number; count: number }>();
 const BRIDGE_TABLES = {
   products: {
-    columns: ["id", "sku", "name", "slug", "short_description", "description", "category_id", "price_zar", "compare_at_price_zar", "cost_price_zar", "weight_kg", "length_cm", "width_cm", "height_cm", "stock_quantity", "low_stock_threshold", "allow_backorder", "images", "image_alt_texts", "image_metadata", "primary_image_url", "image_fingerprint", "image_original_name", "image_original_bytes", "image_processed_bytes", "image_width", "image_height", "image_processed_at", "image_watermarked", "brand", "barcode", "tags", "meta_title", "meta_description", "is_featured", "is_special_of_month", "is_active", "promo_start_date", "promo_end_date", "subcategory", "manufacturer", "supplier", "product_type", "product_condition", "visibility", "highlights", "benefits", "features", "specifications", "applications", "origin_country", "countries_available", "target_customer", "target_industry", "intended_use", "instructions", "warnings", "faqs", "related_products", "attachments", "primary_keyword", "secondary_keywords", "long_tail_keywords", "related_phrases", "synonyms", "alternative_names", "spelling_variations", "customer_questions", "frequently_searched", "search_tags", "hashtags", "industry_terms", "geographic_keywords", "country_keywords", "city_keywords", "identification_terms", "product_classification", "use_cases", "problem_solution_keywords", "search_intent", "audience_keywords", "canonical_url", "og_title", "og_description", "og_image", "twitter_title", "twitter_description", "twitter_image", "internal_links", "seo_content_score", "keyword_coverage_score", "duplicate_check_status", "ai_search_title", "ai_search_summary", "entity_description", "knowledge_summary", "qa_content", "nl_search_phrases", "conversational_questions", "product_facts", "geo_relevance", "target_regions", "business_identity", "expertise_info", "specific_attributes", "parcel_count", "shipping_class", "special_handling", "tax_rate", "tax_included", "packaging_weight_kg", "packed_length_cm", "packed_width_cm", "packed_height_cm", "search_text", "created_at", "updated_at"],
+    columns: ["id", "sku", "name", "slug", "short_description", "description", "category_id", "price_zar", "compare_at_price_zar", "cost_price_zar", "weight_kg", "length_cm", "width_cm", "height_cm", "stock_quantity", "low_stock_threshold", "allow_backorder", "images", "image_alt_texts", "image_metadata", "primary_image_url", "image_fingerprint", "image_original_name", "image_original_bytes", "image_processed_bytes", "image_width", "image_height", "image_processed_at", "image_watermarked", "brand", "barcode", "tags", "meta_title", "meta_description", "is_featured", "is_special_of_month", "is_active", "promo_start_date", "promo_end_date", "subcategory", "manufacturer", "supplier", "product_type", "product_condition", "visibility", "highlights", "benefits", "features", "specifications", "applications", "origin_country", "countries_available", "target_customer", "target_industry", "intended_use", "instructions", "warnings", "faqs", "related_products", "attachments", "primary_keyword", "secondary_keywords", "long_tail_keywords", "related_phrases", "synonyms", "alternative_names", "spelling_variations", "customer_questions", "frequently_searched", "search_tags", "hashtags", "industry_terms", "geographic_keywords", "country_keywords", "city_keywords", "identification_terms", "product_classification", "use_cases", "problem_solution_keywords", "search_intent", "audience_keywords", "canonical_url", "og_title", "og_description", "og_image", "twitter_title", "twitter_description", "twitter_image", "internal_links", "seo_content_score", "keyword_coverage_score", "duplicate_check_status", "ai_search_title", "ai_search_summary", "entity_description", "knowledge_summary", "qa_content", "nl_search_phrases", "conversational_questions", "product_facts", "geo_relevance", "target_regions", "business_identity", "expertise_info", "specific_attributes", "parcel_count", "shipping_class", "special_handling", "tax_rate", "tax_included", "packaging_weight_kg", "packed_length_cm", "packed_width_cm", "packed_height_cm", "is_digital", "digital_file_key", "digital_file_name", "digital_file_size", "digital_file_format", "digital_download_limit", "digital_expiry_days", "search_text", "created_at", "updated_at"],
     writable: [
       // existing core fields
       "id", "sku", "name", "slug", "short_description", "description", "category_id", "price_zar", "compare_at_price_zar", "cost_price_zar", "weight_kg", "length_cm", "width_cm", "height_cm", "stock_quantity", "low_stock_threshold", "allow_backorder", "images", "image_metadata", "primary_image_url", "brand", "barcode", "tags", "meta_title", "meta_description", "is_featured", "is_special_of_month", "is_active",
+      // digital downloads: file reference and per-purchase limits
+      "is_digital", "digital_file_key", "digital_file_name", "digital_file_size", "digital_file_format", "digital_download_limit", "digital_expiry_days",
       // phase 2: general product information
       "subcategory", "manufacturer", "supplier", "product_type", "product_condition", "visibility", "highlights", "benefits", "features", "specifications", "applications", "origin_country", "countries_available", "target_customer", "target_industry", "intended_use", "instructions", "warnings", "faqs", "related_products", "attachments",
       // phase 3: advanced search keywords & tags
@@ -1524,6 +1538,52 @@ async function markOrderPaid(order: PaymentOrder, provider: string, reference: s
   await query<ResultSetHeader>("INSERT INTO payments (id, order_id, provider, transaction_id, payment_id, amount_zar, status, payment_data) VALUES (?, ?, ?, ?, ?, ?, 'completed', NULL)", [crypto.randomUUID(), order.id, provider, reference, reference, expected]);
   // Order confirmation email is sent only after payment is verified as successful.
   await sendOrderConfirmationEmailInternal(order);
+  // Every provider funnels through here, so a digital purchase is honoured the
+  // same way whether the customer paid by PayFast, Yoco or PayPal.
+  await deliverDigitalPurchases(order);
+}
+/**
+ * Create the buyer's download links and email them. Runs after payment is
+ * verified, and is idempotent so a retried webhook cannot issue duplicates.
+ */
+async function deliverDigitalPurchases(order: PaymentOrder): Promise<void> {
+  try {
+    // getPaymentOrder only selects the payment fields, so the buyer address is
+    // read here rather than assumed to be on the object.
+    const rows = await query<RowDataPacket[]>("SELECT guest_email FROM orders WHERE id = ? LIMIT 1", [order.id]);
+    const email = String((rows as unknown as Array<Record<string, unknown>>)[0]?.guest_email || "");
+    if (!email) {
+      console.warn(`Digital links for ${order.order_number} could not be emailed: the order has no customer address.`);
+    }
+    const issued = await issueDigitalEntitlements(query, { id: order.id, orderNumber: order.order_number, email });
+    if (!issued.length) return;
+    if (!email) return;
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.warn(`Digital links issued for ${order.order_number} but SMTP is not configured, so the email was not sent.`);
+      return;
+    }
+    const nodemailer = (await import("nodemailer")).default;
+    const transport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 465),
+      secure: Number(process.env.SMTP_PORT || 465) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+    await transport.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to: email,
+      subject: `Your download from Wonderful Dragon Fruit — ${order.order_number}`,
+      html: digitalEmailBody({
+        orderNumber: String(order.order_number || ""),
+        downloads: issued,
+        expiryNote: "Your download link is personal to this order and has a limited number of downloads. Save the file once you have it.",
+      }),
+    });
+  } catch (error) {
+    // A delivery failure must never un-pay an order: the entitlement rows already
+    // exist and the admin can reissue from the panel.
+    console.warn("Digital delivery failed", error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function sendOrderConfirmationEmailInternal(order: PaymentOrder) {
@@ -2253,24 +2313,28 @@ async function createOrderFromCart(body: Record<string, any>) {
   // Shipping is re-quoted here rather than read from the request. The browser's
   // shippingCost is a display value only: trusting it let a tampered request send
   // shippingCost: 0 and take free shipping, which this business never offers.
+  // Digital lines (ebooks) carry no weight and no dimensions, so a cart made up
+  // entirely of them must never be charged delivery. Anything that ships at all
+  // still goes through the live carrier quote below.
+  const allDigital = await isAllDigitalCart(query, normalized.map((line) => line.product.id));
   const parcel = parcelForOrderLines(normalized);
   const requestedService = String(body.shippingMethod || "").trim();
-  const quote = await quoteOrderShipping(parcel, body.shippingAddress);
-  if (!quote.rates.length) {
+  const quote = allDigital ? { rates: [] as Array<{ service: string; price: number }>, notices: [] as string[] } : await quoteOrderShipping(parcel, body.shippingAddress);
+  if (!allDigital && !quote.rates.length) {
     // Fail closed. Charging nothing for delivery would breach the no-free-shipping
     // policy, and inventing a figure would misquote the customer, so the order is
     // declined with an actionable message instead.
     throw new Error("We could not reach the delivery carriers just now. Please try again in a moment.");
   }
-  const chosenRate = selectQuotedRate(quote.rates, requestedService);
-  if (!chosenRate) {
+  const chosenRate = allDigital ? null : selectQuotedRate(quote.rates, requestedService);
+  if (!allDigital && !chosenRate) {
     // The customer's chosen option is not on the current quote, so the price they
     // saw cannot be honoured. Substituting a different rate would let someone pay
     // a locker price while expecting door delivery, so the order is declined and
     // the customer is asked to re-select.
     throw new Error("The delivery option you chose is no longer available for this address. Please re-select shipping and try again.");
   }
-  const shipping = Math.max(0, Number(chosenRate.price));
+  const shipping = allDigital ? 0 : Math.max(0, Number(chosenRate?.price || 0));
   // The discount is resolved from the promo code here on the server. A discount
   // supplied by the browser is deliberately ignored, so a tampered request cannot
   // reduce the amount owed.
@@ -2286,7 +2350,7 @@ async function createOrderFromCart(body: Record<string, any>) {
   const total = Math.max(0, subtotal + shipping - discount);
   const orderId = crypto.randomUUID();
   const orderNumber = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, promo_code, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, promo && promo.valid ? promo.code : null, String(chosenRate.service || requestedService || "standard"), JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
+  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, promo_code, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, promo && promo.valid ? promo.code : null, String(chosenRate?.service || requestedService || (allDigital ? "digital-delivery" : "standard")), JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
   for (const line of normalized) await query<ResultSetHeader>("INSERT INTO order_items (id, order_id, product_id, product_name, product_sku, quantity, unit_price_zar, total_price_zar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), orderId, line.product.id, line.product.name, line.product.sku, line.quantity, line.unit, line.unit * line.quantity]);
   // Count the redemption only once the order exists, so abandoned carts do not
   // consume a limited code.
@@ -3054,6 +3118,161 @@ app.post("/api/functions/:name", async (req, res) => {
       await notifyOwner(`PayPal API failure: ${req.params.name}`, `A PayPal checkout operation failed for order ${String(req.body?.orderId || req.body?.orderNumber || "unknown")}. Error: ${message}`);
     }
     return res.status(503).json(apiError(message, "INTEGRATION_ERROR", 503));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Digital downloads (ebooks). Files live in Manus Storage under an unguessable
+// key and are never served directly: the token is validated first, then the
+// browser is redirected to a short-lived signed URL. An all-digital cart is
+// never charged delivery (see createOrderFromCart).
+// ---------------------------------------------------------------------------
+app.post("/api/admin/digital/upload", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json(apiError("A file is required", "FILE_REQUIRED", 400));
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verify the admin-panel password before uploading files", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const allowed = ["application/pdf", "application/epub+zip", "application/zip", "application/x-zip-compressed"];
+    const ext = (file.originalname.split(".").pop() || "").toLowerCase();
+    if (!allowed.includes(file.mimetype) && !["pdf", "epub", "zip"].includes(ext)) {
+      return res.status(400).json(apiError("Digital products must be PDF, EPUB or ZIP files", "INVALID_FILE_TYPE", 400));
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      return res.status(413).json(apiError("Digital files must be 200MB or smaller", "FILE_TOO_LARGE", 413));
+    }
+    if (!process.env.MANUS_API_URL || !process.env.MANUS_API_KEY) {
+      return res.status(503).json(apiError("Manus Storage is not configured", "STORAGE_NOT_CONFIGURED", 503));
+    }
+    const safeName = file.originalname.replace(/[^A-Za-z0-9._-]/g, "-").slice(-120);
+    const key = `${DIGITAL_BUCKET}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}-${safeName}`;
+    const presign = await fetch(`${process.env.MANUS_API_URL}/v1/storage/presign/put?path=${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${process.env.MANUS_API_KEY}` },
+    });
+    const signed = (await presign.json()) as { url?: string; error?: string };
+    if (!presign.ok || !signed.url) {
+      return res.status(502).json(apiError(signed.error || "Storage upload URL unavailable", "STORAGE_PRESIGN_FAILED", 502));
+    }
+    const put = await fetch(signed.url, {
+      method: "PUT",
+      headers: { "Content-Type": file.mimetype || "application/octet-stream" },
+      body: new Uint8Array(file.buffer),
+    });
+    if (!put.ok) return res.status(502).json(apiError("Storage upload failed", "STORAGE_UPLOAD_FAILED", 502));
+    return res.json({
+      data: {
+        fileKey: key,
+        fileName: file.originalname.slice(0, 255),
+        fileSize: file.size,
+        fileFormat: ext || "pdf",
+      },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Upload failed", "STORAGE_ERROR", 500));
+  }
+});
+
+// Link state, so the download page can explain an expired or exhausted link
+// without consuming one of the buyer's downloads.
+app.get("/api/digital/status/:token", async (req, res) => {
+  try {
+    const check = await resolveDownload(query, String(req.params.token || ""));
+    if (!check.ok) return res.status(check.status).json(apiError(check.reason, "DOWNLOAD_UNAVAILABLE", check.status));
+    return res.json({ data: { productName: check.productName, remaining: check.remaining, fileName: check.fileName }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Lookup failed", "DIGITAL_ERROR", 500));
+  }
+});
+
+// The actual delivery. Counts the download only once the signed URL is issued.
+app.get("/download/:token", async (req, res) => {
+  const token = String(req.params.token || "");
+  try {
+    const check = await resolveDownload(query, token);
+    if (!check.ok) {
+      return res.status(check.status).send(
+        `<!doctype html><html><head><meta charset="utf-8"><title>Download unavailable</title></head>
+         <body style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:560px;margin:80px auto;padding:0 20px;color:#222;">
+         <h1 style="color:#2f6b3a;font-size:22px;">Download unavailable</h1>
+         <p>${check.reason}</p>
+         <p style="color:#666;font-size:14px;">Need help? Email <a href="mailto:dfsa.africa@proagrisa.co.za">dfsa.africa@proagrisa.co.za</a>
+         or WhatsApp <a href="https://wa.me/27834474639">+27 83 447 4639</a>.</p>
+         </body></html>`
+      );
+    }
+    const signedUrl = await signedStorageUrl(check.fileKey, 300);
+    if (!signedUrl) {
+      await recordDownloadEvent(query, check.id, token, req.ip || null, String(req.get("user-agent") || ""), "sign_failed");
+      return res.status(502).send("We could not prepare your download just now. Please try again in a moment.");
+    }
+    await incrementDownloadCount(query, check.id);
+    await recordDownloadEvent(query, check.id, token, req.ip || null, String(req.get("user-agent") || ""), "ok");
+    return res.redirect(302, signedUrl);
+  } catch (error) {
+    console.warn("Digital download failed", error instanceof Error ? error.message : String(error));
+    return res.status(500).send("We could not prepare your download just now. Please try again in a moment.");
+  }
+});
+
+// Admin: every issued entitlement, newest first.
+app.get("/api/admin/digital/downloads", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const rows = await query<RowDataPacket[]>(
+      `SELECT d.id, d.order_number, d.product_name, d.email, d.download_count,
+              d.max_downloads, d.expires_at, d.revoked, d.last_downloaded_at, d.created_at
+         FROM digital_downloads d
+        ORDER BY d.created_at DESC
+        LIMIT 500`
+    );
+    return res.json({ data: { downloads: rows }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Lookup failed", "DIGITAL_ERROR", 500));
+  }
+});
+
+// Admin: withdraw a link that has been shared or abused.
+app.post("/api/admin/digital/revoke", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const id = Number(req.body?.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json(apiError("A download id is required", "ID_REQUIRED", 400));
+    await query<ResultSetHeader>("UPDATE digital_downloads SET revoked = 1 WHERE id = ?", [id]);
+    return res.json({ data: { id, revoked: true }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Revoke failed", "DIGITAL_ERROR", 500));
+  }
+});
+
+// Admin: reissue a link for an order (customer lost the email, or a link expired).
+app.post("/api/admin/digital/reissue", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const orderId = String(req.body?.orderId || "").trim();
+    if (!orderId) return res.status(400).json(apiError("An order id is required", "ORDER_REQUIRED", 400));
+    const orders = await query<RowDataPacket[]>(
+      "SELECT id, order_number, guest_email FROM orders WHERE id = ? OR order_number = ? LIMIT 1",
+      [orderId, orderId]
+    );
+    const order = (orders as unknown as Array<Record<string, unknown>>)[0];
+    if (!order) return res.status(404).json(apiError("Order not found", "ORDER_NOT_FOUND", 404));
+    await query<ResultSetHeader>("UPDATE digital_downloads SET revoked = 1 WHERE order_id = ? AND revoked = 0", [String(order.id)]);
+    const issued = await issueDigitalEntitlements(query, {
+      id: String(order.id),
+      orderNumber: order.order_number ? String(order.order_number) : null,
+      email: String(order.guest_email || ""),
+    });
+    return res.json({ data: { reissued: issued.length, downloads: issued }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Reissue failed", "DIGITAL_ERROR", 500));
   }
 });
 

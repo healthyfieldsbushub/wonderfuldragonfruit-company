@@ -57,6 +57,7 @@ const navItems = [
   { title: 'Shipping Rates', url: '/admin/shipping-rates', icon: Truck },
   { title: 'Promo Codes', url: '/admin/promo-codes', icon: Tag },
   { title: 'Invoices', url: '/admin/invoices', icon: Receipt },
+  { title: 'Digital Downloads', url: '/admin/digital-downloads', icon: FileText },
   { title: 'Quotations', url: '/admin/quotations', icon: FileText },
   
   // Content & Marketing

@@ -94,6 +94,8 @@ const Checkout = () => {
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [selectedShipping, setSelectedShipping] = useState<ShippingRate | null>(null);
   const [loadingRates, setLoadingRates] = useState(false);
+  // True when every line is a digital download, so delivery is never charged.
+  const [allDigital, setAllDigital] = useState(false);
   
   // PUDO lockers
   const [pudoLockers, setPudoLockers] = useState<PudoLocker[]>([]);
@@ -128,7 +130,7 @@ const Checkout = () => {
   // Prevent duplicate submissions
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const shippingCost = selectedShipping?.price || 0;
+  const shippingCost = allDigital ? 0 : (selectedShipping?.price || 0);
   const certificationCost = calculateCertificationTotal(certifications);
   const total = Math.max(0, totalWithRooting + shippingCost + certificationCost - promoDiscount);
 
@@ -156,7 +158,7 @@ const Checkout = () => {
       const productIds = items.map(item => item.productId);
       const { data: products } = await appClient
         .from('products')
-        .select('id, weight_kg, length_cm, width_cm, height_cm')
+        .select('id, weight_kg, length_cm, width_cm, height_cm, is_digital')
         .in('id', productIds);
       
       if (products) {
@@ -164,10 +166,17 @@ const Checkout = () => {
         let maxLength = 30;
         let maxWidth = 20;
         let maxHeight = 15;
+        let digitalCount = 0;
         
         products.forEach(product => {
           const cartItem = items.find(i => i.productId === product.id);
           const quantity = cartItem?.quantity || 1;
+
+          // A digital line ships nothing, so it must not add weight or size.
+          if ((product as { is_digital?: number }).is_digital) {
+            digitalCount += 1;
+            return;
+          }
           
           // Sum weights (use 0.5kg default if not set)
           totalWeight += (product.weight_kg || 0.5) * quantity;
@@ -179,6 +188,7 @@ const Checkout = () => {
         });
         
         setProductDimensions({ totalWeight, maxLength, maxWidth, maxHeight });
+        setAllDigital(products.length > 0 && digitalCount === products.length);
       }
     };
     
@@ -187,7 +197,7 @@ const Checkout = () => {
 
   // Fetch shipping rates when postal code or dimensions change
   useEffect(() => {
-    if (shippingData.postalCode.length >= 4 && productDimensions.totalWeight > 0) {
+    if (!allDigital && shippingData.postalCode.length >= 4 && productDimensions.totalWeight > 0) {
       fetchShippingRates();
     }
   }, [shippingData.postalCode, productDimensions]);
@@ -233,6 +243,10 @@ const Checkout = () => {
   };
 
   const handleDeliverySubmit = () => {
+    if (allDigital) {
+      setStep("payment");
+      return;
+    }
     if (!selectedShipping) {
       toast.error("Please select a shipping method");
       return;
@@ -339,7 +353,7 @@ const Checkout = () => {
           includeRooting: item.includeRooting,
         })),
         shippingData,
-        selectedShipping?.service || "Standard",
+        allDigital ? "digital-delivery" : (selectedShipping?.service || "Standard"),
         shippingCost,
         rootingCost,
         user?.id,
@@ -671,7 +685,15 @@ const Checkout = () => {
                             Choose your preferred delivery option
                           </p>
                           
-                          {loadingRates ? (
+                          {allDigital ? (
+                            <div className="p-6 rounded-lg border border-dashed bg-primary/5 text-center">
+                              <Package className="h-8 w-8 mx-auto text-primary mb-2" />
+                              <p className="font-medium text-foreground">Digital delivery — no shipping charge</p>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                Your download link will be emailed to you as soon as your payment is confirmed.
+                              </p>
+                            </div>
+                          ) : loadingRates ? (
                             <div className="flex items-center justify-center py-8 rounded-lg border border-dashed">
                               <Loader2 className="h-6 w-6 animate-spin text-primary" />
                               <span className="ml-2 text-muted-foreground">Loading shipping options...</span>
