@@ -1807,7 +1807,10 @@ async function createYocoCheckout(body: Record<string, any>) {
     },
     body: JSON.stringify({
       amount: Math.round(Number(order.total_zar) * 100),
-      currency: String(order.currency || "ZAR"),
+      // The amount is total_zar in cents, so the currency is ZAR by definition.
+      // Do not read it from the order row: a stale or empty value must never
+      // present a rand amount as another currency.
+      currency: "ZAR",
       successUrl: String(body.successUrl || ""),
       cancelUrl: String(body.cancelUrl || ""),
       metadata: {
