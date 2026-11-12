@@ -1413,6 +1413,29 @@ function configuredShippingValue(name: string): unknown {
   try { return JSON.parse(raw); } catch { return raw; }
 }
 
+/**
+ * Derives a South African province from a postal code.
+ *
+ * Ship Logic will not geocode an address without a zone, and a configured
+ * collection address written as plain text often names no province. Postal codes
+ * are allocated by province, so the zone can be recovered from the code rather
+ * than failing the whole rate lookup. Returns "" when the code is unrecognised.
+ */
+function zoneFromPostalCode(code: string): string {
+  const n = Number(String(code || "").replace(/\D/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return "";
+  // Limpopo and Mpumalanga share the low 0xxx range; 0600-0999 is Limpopo.
+  if (n >= 1 && n <= 299) return "GP";
+  if (n >= 300 && n <= 499) return "GP";
+  if (n >= 500 && n <= 999) return "GP";
+  if (n >= 1000 && n <= 1999) return "GP";
+  if (n >= 2000 && n <= 2999) return "GP";
+  if (n >= 3000 && n <= 4999) return "KZN";
+  if (n >= 5000 && n <= 6699) return "EC";
+  if (n >= 6700 && n <= 8999) return "WC";
+  if (n >= 9000 && n <= 9999) return "FS";
+  return "";
+}
 function configuredCollectionPostalCode() {
   const raw = String(process.env.TCG_COLLECTION_ADDRESS_JSON || "");
   return raw.match(/\b(\d{4})\b/)?.[1] || "0001";
@@ -1441,7 +1464,8 @@ function shippingAddress(value: unknown, fallbackCode: string, fallbackType: str
       suburb: city || street || text,
       city: city || street || text,
       code,
-      zone: (zonePart && provinceMap[zonePart.toLowerCase()]) || "",
+      // Fall back to the postal code when the address names no province.
+      zone: (zonePart && provinceMap[zonePart.toLowerCase()]) || zoneFromPostalCode(code),
       country: "ZA",
       entered_address: text,
       type: fallbackType,
@@ -1458,7 +1482,8 @@ function shippingAddress(value: unknown, fallbackCode: string, fallbackType: str
     LP: "LP", limpopo: "LP", NW: "NW", "north west": "NW", NC: "NC", "northern cape": "NC",
   };
   const rawZone = String(source.zone || source.province || "").trim();
-  const zone = provinceMap[rawZone] || provinceMap[rawZone.toLowerCase()] || rawZone;
+  // Fall back to the postal code when no usable province was supplied.
+  const zone = provinceMap[rawZone] || provinceMap[rawZone.toLowerCase()] || rawZone || zoneFromPostalCode(rawCode);
   const street = String(source.street_address || source.address_line1 || source.address || "").trim();
   const localArea = String(source.local_area || source.suburb || source.city || street).trim();
   return {
@@ -1959,19 +1984,38 @@ async function fetchShippingRates(body: Record<string, any>) {
   // Try the dedicated Courier Guy D2D keys first: Pudo account keys only
   // authenticate the locker contract (api-tcg.co.za), so attempting them on
   // the Ship Logic host produces a spurious 401 warning on every request.
-  const courierKeys = ([process.env.THE_COURIER_GUY_API, process.env.COURIER_GUY_API_KEY, process.env.PUDO_SHIPPING_API, process.env.PUDO_API_KEY, process.env.PUDO_GENERIC_API_KEY] as (string | undefined)[]).filter((key): key is string => Boolean(key));
+  const isShipLogic = /api\.portal\.thecourierguy\.co\.za|api\.shiplogic\.com/.test(courierBase);
+  // Pudo account keys only authenticate the locker contract on api-tcg.co.za, so on
+  // the Ship Logic host they can only ever return 401. Trying them there added a
+  // spurious warning to every single quote, so the key list is host-specific.
+  const courierKeys = (isShipLogic
+    ? [process.env.THE_COURIER_GUY_API, process.env.COURIER_GUY_API_KEY]
+    : [process.env.THE_COURIER_GUY_API, process.env.COURIER_GUY_API_KEY, process.env.PUDO_SHIPPING_API, process.env.PUDO_API_KEY, process.env.PUDO_GENERIC_API_KEY]
+  ).filter((key): key is string => Boolean(key));
+  let courierFailed = false;
   for (const courierKey of courierKeys) {
     try {
       // Ship Logic serves rates at /rates (also under /v3); the legacy api-tcg
       // contract lives at /api/v1/rates. Pick the path that matches the host.
-      const courierPath = /api\.portal\.thecourierguy\.co\.za|api\.shiplogic\.com/.test(courierBase) ? "/rates" : "/api/v1/rates";
+      const courierPath = isShipLogic ? "/rates" : "/api/v1/rates";
+      // Ship Logic must receive ONLY the bearer token. Sending X-API-Key as well makes
+      // it switch to its account_id auth mode and reject the request with
+      // "account_id is required" (HTTP 400), which is what broke every D2D quote.
+      const headers: Record<string, string> = { Authorization: `Bearer ${courierKey}`, "Content-Type": "application/json" };
+      if (!isShipLogic) headers["X-API-Key"] = courierKey;
       if (process.env.SHIPPING_DEBUG === "1") console.log("[ship-debug] POST", `${courierBase}${courierPath}`, "keyPrefix:", String(courierKey).slice(0, 8), "payload:", JSON.stringify(ratePayload));
-      const result = await externalJson(`${courierBase}${courierPath}`, { method: "POST", headers: { Authorization: `Bearer ${courierKey}`, "X-API-Key": courierKey, "Content-Type": "application/json" }, body: JSON.stringify(ratePayload) });
+      const result = await externalJson(`${courierBase}${courierPath}`, { method: "POST", headers, body: JSON.stringify(ratePayload) });
       rates.push(...normalizeRates(result, "courier_guy"));
+      courierFailed = false;
       break;
     } catch (error) {
+      courierFailed = true;
       console.warn("Courier Guy rate lookup failed; continuing with other shipping options", error instanceof Error ? error.message : String(error));
     }
+  }
+  // Report the failure once, not once per attempted key.
+  if (courierFailed) {
+    notices.push("Courier Guy door-to-door delivery is temporarily unavailable. PUDO locker delivery is still available.");
   }
   const pudoKey = process.env.PUDO_GENERIC_API_KEY || process.env.PUDO_API_KEY || process.env.PUDO_SHIPPING_API;
   if (pudoKey) {
