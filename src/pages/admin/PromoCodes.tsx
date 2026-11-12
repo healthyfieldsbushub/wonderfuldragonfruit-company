@@ -99,8 +99,10 @@ interface Analytics {
   series: { day: string; redemptions: number; discount_given: number }[];
 }
 
-const zar = (value: number | string | null | undefined) =>
-  `R${(Number(value) || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// The same formatter the storefront uses, so an admin figure and a customer
+// figure for the same amount always read identically.
+const zarFormatter = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' });
+const zar = (value: number | string | null | undefined) => zarFormatter.format(Number(value) || 0);
 
 /** Percentage of a code's allowance that has been used. */
 function usedPercent(row: PromoCodeRow) {
