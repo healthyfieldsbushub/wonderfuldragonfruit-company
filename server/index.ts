@@ -869,12 +869,82 @@ app.post("/api/admin/distributor-enquiries/test-notification", async (req, res) 
   }
 });
 
+/**
+ * Resolves a promo code against an order total.
+ *
+ * This is the single source of truth for both the checkout preview and order
+ * creation. The discount is always computed here, never accepted from the browser,
+ * and every rejection carries a message the buyer can act on.
+ */
+type PromoResolution = {
+  valid: boolean;
+  message: string;
+  code: string;
+  discount_type?: string;
+  discount_value?: number;
+  discount_amount: number;
+  description?: string | null;
+};
+
+async function resolvePromoCode(rawCode: string, orderTotal: number): Promise<PromoResolution> {
+  const code = String(rawCode || "").trim().toUpperCase();
+  const reject = (message: string): PromoResolution => ({ valid: false, message, code, discount_amount: 0 });
+  if (!code) return reject("Enter a promo code");
+
+  const rows = await query<RowDataPacket[]>("SELECT * FROM promo_codes WHERE UPPER(code) = ? LIMIT 1", [code]);
+  const promo = rows[0];
+  if (!promo) return reject("That promo code was not found");
+  if (!asBool(promo.is_active)) return reject("That promo code is no longer active");
+
+  const now = Date.now();
+  if (promo.starts_at && new Date(promo.starts_at).getTime() > now) {
+    // Format the date rather than slicing the driver's Date string, which reads
+    // "Fri Jan 01 2027 ..." and would slice to "Fri Jan 01".
+    const from = new Date(promo.starts_at).toISOString().slice(0, 10);
+    return reject(`This promo code starts on ${from}`);
+  }
+  if (promo.expires_at && new Date(promo.expires_at).getTime() < now) {
+    return reject("That promo code has expired");
+  }
+
+  const minOrder = Number(promo.min_order_zar) || 0;
+  if (minOrder > 0 && Number(orderTotal) < minOrder) {
+    return reject(`This promo code needs an order of at least R ${minOrder.toFixed(2)}`);
+  }
+
+  // A null max_uses means the code may be used any number of times.
+  const maxUses = promo.max_uses === null || promo.max_uses === undefined ? null : Number(promo.max_uses);
+  if (maxUses !== null && maxUses > 0 && Number(promo.current_uses) >= maxUses) {
+    return reject("That promo code has reached its usage limit");
+  }
+
+  // Cents arithmetic so a percentage discount cannot drift a cent.
+  const cents = (value: unknown) => Math.round((Number(value) || 0) * 100);
+  const value = Number(promo.discount_value) || 0;
+  const type = String(promo.discount_type || "fixed");
+  const orderCents = cents(orderTotal);
+  const rawCents = type === "percentage" ? Math.round((orderCents * value) / 100) : cents(value);
+  // Never discount more than the order is worth.
+  const discountCents = Math.max(0, Math.min(rawCents, orderCents));
+
+  return {
+    valid: true,
+    message: "Promo code applied",
+    code: String(promo.code),
+    discount_type: type,
+    discount_value: value,
+    discount_amount: discountCents / 100,
+    description: promo.description || null,
+  };
+}
+
 app.post("/api/rpc/:name", async (req, res) => {
   if (req.params.name === "validate_promo_code") {
     try {
       const code = String(req.body?.p_code || req.body?.code || "");
-      const rows = await query<RowDataPacket[]>("SELECT * FROM promo_codes WHERE code = ? AND (expires_at IS NULL OR expires_at >= NOW()) AND COALESCE(is_active, 1) = 1 LIMIT 1", [code]);
-      return res.json({ data: rows[0] || null, error: null });
+      const orderTotal = Number(req.body?.p_order_total ?? req.body?.orderTotal ?? 0) || 0;
+      const result = await resolvePromoCode(code, orderTotal);
+      return res.json({ data: result, error: null });
     } catch (error) { return res.status(500).json(apiError(error instanceof Error ? error.message : "RPC failed", "RPC_ERROR", 500)); }
   }
   return res.status(501).json(apiError(`RPC ${req.params.name} is not implemented yet`, "RPC_NOT_IMPLEMENTED", 501));
@@ -2058,12 +2128,21 @@ async function createOrderFromCart(body: Record<string, any>) {
     return { product, quantity, unit };
   });
   const shipping = Math.max(0, Number(body.shippingCost || 0));
-  const discount = Math.max(0, Number(body.promoDiscountZar || 0));
+  // The discount is resolved from the promo code here on the server. A discount
+  // supplied by the browser is deliberately ignored, so a tampered request cannot
+  // reduce the amount owed.
+  const promo = body.promoCode ? await resolvePromoCode(String(body.promoCode), subtotal) : null;
+  const discount = promo && promo.valid ? promo.discount_amount : 0;
   const total = Math.max(0, subtotal + shipping - discount);
   const orderId = crypto.randomUUID();
   const orderNumber = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, body.shippingMethod || "standard", JSON.stringify(body.shippingAddress || {}), body.promoCode ? `Promo code: ${body.promoCode}` : null]);
+  await query<ResultSetHeader>("INSERT INTO orders (id, order_number, customer_id, guest_email, status, payment_status, subtotal_zar, shipping_cost_zar, discount_zar, total_zar, currency, shipping_method, shipping_address, notes) VALUES (?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?, 'ZAR', ?, ?, ?)", [orderId, orderNumber, body.customerId || null, body.shippingAddress?.email || null, subtotal, shipping, discount, total, body.shippingMethod || "standard", JSON.stringify(body.shippingAddress || {}), promo && promo.valid ? `Promo code: ${promo.code} (-R ${discount.toFixed(2)})` : null]);
   for (const line of normalized) await query<ResultSetHeader>("INSERT INTO order_items (id, order_id, product_id, product_name, product_sku, quantity, unit_price_zar, total_price_zar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), orderId, line.product.id, line.product.name, line.product.sku, line.quantity, line.unit, line.unit * line.quantity]);
+  // Count the redemption only once the order exists, so abandoned carts do not
+  // consume a limited code.
+  if (promo && promo.valid) {
+    await query<ResultSetHeader>("UPDATE promo_codes SET current_uses = COALESCE(current_uses, 0) + 1 WHERE UPPER(code) = ?", [promo.code.toUpperCase()]);
+  }
   return { success: true, orderId, orderNumber, total };
 }
 
