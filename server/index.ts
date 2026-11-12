@@ -16,6 +16,7 @@ import {
   updateInvoice,
   invoiceToPdfInput,
   logInvoiceEvent,
+  asBool,
 } from "./invoices";
 import {
   sendDocumentEmail,
@@ -3895,7 +3896,7 @@ app.get("/api/admin/quotations/:id/pdf", async (req, res) => {
       })),
       subtotal: Number(quotation.subtotal_zar),
       discount: 0,
-      vatEnabled: Boolean(quotation.vat_enabled),
+      vatEnabled: asBool(quotation.vat_enabled),
       vatRate: 15,
       vat: Number(quotation.vat_zar),
       total: Number(quotation.total_zar),
@@ -3917,6 +3918,17 @@ app.get("/api/admin/quotations/:id/pdf", async (req, res) => {
 // on a permanent public path.
 
 const DOCUMENT_URL_TTL_MINUTES = 60;
+
+/**
+ * The site's public origin.
+ *
+ * This is configuration and never the request Host: behind the platform proxy the
+ * internal Host is not reachable from Meta, so a document link built from it would
+ * be handed to WhatsApp and then fail to fetch.
+ */
+function publicSiteUrl() {
+  return (process.env.PUBLIC_SITE_URL || "https://wonderfuldragonfruit.company").replace(/\/+$/, "");
+}
 
 function documentUrlSecret() {
   return process.env.DOCUMENT_URL_SECRET || process.env.MANUS_JWT_SECRET || "";
@@ -3986,7 +3998,7 @@ async function renderStoredDocument(kind: "invoice" | "quotation", id: string) {
       })),
       subtotal: Number(quotation.subtotal_zar),
       discount: 0,
-      vatEnabled: Boolean(quotation.vat_enabled),
+      vatEnabled: asBool(quotation.vat_enabled),
       vatRate: 15,
       vat: Number(quotation.vat_zar),
       total: Number(quotation.total_zar),
@@ -4039,7 +4051,7 @@ async function deliverDocument(req: Request, res: Response, kind: "invoice" | "q
 
     const emailTo = String(body.email || document.email || "").trim();
     const whatsappTo = String(body.whatsapp || document.whatsapp || "").trim();
-    const baseUrl = String(body.baseUrl || `https://${req.hostname === "localhost" ? "wonderfuldragonfruit.company" : req.hostname}`);
+    const baseUrl = String(body.baseUrl || publicSiteUrl());
     const results: DeliveryResult[] = [];
 
     if (channels.includes("email")) {

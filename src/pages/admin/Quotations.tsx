@@ -32,6 +32,10 @@ interface ProductSearchResult {
   primary_image_url: string | null;
 }
 
+/** South African VAT rate, expressed as a percentage. */
+const VAT_RATE = 15;
+/** Rounds a money amount to whole cents, half up. */
+const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
 const formatCurrency = (v: number) =>
   new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(v);
 
@@ -87,7 +91,7 @@ export default function AdminQuotations() {
     if (existing) {
       setItems(items.map(i =>
         i.product_id === product.id
-          ? { ...i, quantity: i.quantity + 1, total_price_zar: (i.quantity + 1) * i.unit_price_zar }
+          ? { ...i, quantity: i.quantity + 1, total_price_zar: roundMoney((i.quantity + 1) * i.unit_price_zar) }
           : i
       ));
     } else {
@@ -107,13 +111,13 @@ export default function AdminQuotations() {
   const updateItemQuantity = (idx: number, qty: number) => {
     if (qty < 1) return;
     setItems(items.map((item, i) =>
-      i === idx ? { ...item, quantity: qty, total_price_zar: qty * item.unit_price_zar } : item
+      i === idx ? { ...item, quantity: qty, total_price_zar: roundMoney(qty * item.unit_price_zar) } : item
     ));
   };
 
   const updateItemPrice = (idx: number, price: number) => {
     setItems(items.map((item, i) =>
-      i === idx ? { ...item, unit_price_zar: price, total_price_zar: item.quantity * price } : item
+      i === idx ? { ...item, unit_price_zar: price, total_price_zar: roundMoney(item.quantity * price) } : item
     ));
   };
 
@@ -121,9 +125,12 @@ export default function AdminQuotations() {
     setItems(items.filter((_, i) => i !== idx));
   };
 
-  const subtotal = items.reduce((sum, i) => sum + i.total_price_zar, 0);
-  const vat = vatEnabled ? subtotal * 0.15 : 0;
-  const total = subtotal + vat;
+  // Money is calculated in integer cents. Multiplying decimals directly produces
+  // values such as 65.47499999999999 for 15% of R436.50, which then displays and
+  // stores as a rounded-down cent.
+  const subtotal = roundMoney(items.reduce((sum, i) => sum + Math.round(i.total_price_zar * 100), 0) / 100);
+  const vat = vatEnabled ? Math.round((Math.round(subtotal * 100) * VAT_RATE) / 100) / 100 : 0;
+  const total = roundMoney((Math.round(subtotal * 100) + Math.round(vat * 100)) / 100);
 
   const handleSave = async () => {
     if (!customerName.trim()) { toast.error('Customer name is required'); return; }

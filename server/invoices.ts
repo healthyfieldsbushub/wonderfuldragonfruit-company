@@ -52,6 +52,15 @@ export type InvoiceInput = {
 const DEFAULT_VAT_RATE = 15;
 const round2 = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
 
+/**
+ * Reads a MySQL tinyint(1) flag as a real boolean.
+ *
+ * Boolean("0") is true, so a flag must be normalised numerically rather than by
+ * truthiness. Without this, a driver returning "0" as a string would silently add
+ * VAT to a document that was marked as having none.
+ */
+export const asBool = (value: unknown) => Number(value) === 1;
+
 export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -70,20 +79,34 @@ export async function nextInvoiceNumber(query: QueryFn, prefix = "INV", year = n
   return `${prefix}-${year}-${String(next).padStart(4, "0")}`;
 }
 
+/**
+ * Line and VAT totals for an invoice or quotation.
+ *
+ * All arithmetic is done in integer cents. Binary floating point cannot represent
+ * decimal money exactly: 436.50 * 0.15 evaluates to 65.47499999999999, so rounding
+ * that expression to cents yields 65.47 instead of the correct 65.48, and the
+ * invoice total comes out one cent short. Multiplying into cents first, then
+ * rounding, keeps half-up rounding correct.
+ */
 export function calculateTotals(items: InvoiceItemInput[], invoiceDiscount: number, vatEnabled: boolean, vatRate: number) {
+  const cents = (value: number) => Math.round((Number(value) || 0) * 100);
+
   const lines = (items || []).map((item, index) => {
     const quantity = Number(item.quantity) || 0;
     const unitPrice = round2(Number(item.unitPrice) || 0);
     const discount = round2(Number(item.discount) || 0);
-    const total = round2(quantity * unitPrice - discount);
+    // Round the line to cents before it can accumulate drift into the subtotal.
+    const total = (cents(quantity * unitPrice) - cents(discount)) / 100;
     return { ...item, sortOrder: index, quantity, unitPrice, discount, total };
   });
-  const subtotal = round2(lines.reduce((sum, line) => sum + line.total, 0));
+
+  const subtotal = lines.reduce((sum, line) => sum + cents(line.total), 0) / 100;
   const discount = round2(invoiceDiscount);
   const taxable = round2(Math.max(0, subtotal - discount));
   const rate = vatEnabled ? Number(vatRate) || DEFAULT_VAT_RATE : 0;
-  const vat = vatEnabled ? round2((taxable * rate) / 100) : 0;
-  const total = round2(taxable + vat);
+  // Round VAT on the cent value so 15% of R436.50 is R65.48, not R65.47.
+  const vat = vatEnabled ? Math.round((cents(taxable) * rate) / 100) / 100 : 0;
+  const total = (cents(taxable) + cents(vat)) / 100;
   return { lines, subtotal, discount, vat, vatRate: rate, total };
 }
 
@@ -289,7 +312,7 @@ export async function updateInvoice(query: QueryFn, invoiceId: string, input: In
   const totals = calculateTotals(
     items,
     input.discount ?? Number(current.discount_zar),
-    input.vatEnabled ?? Boolean(current.vat_enabled),
+    input.vatEnabled ?? asBool(current.vat_enabled),
     input.vatRate ?? Number(current.vat_rate),
   );
 
@@ -312,7 +335,7 @@ export async function updateInvoice(query: QueryFn, invoiceId: string, input: In
       input.dueDate ? String(input.dueDate).slice(0, 10) : current.due_date,
       totals.subtotal,
       totals.discount,
-      (input.vatEnabled ?? Boolean(current.vat_enabled)) ? 1 : 0,
+      (input.vatEnabled ?? asBool(current.vat_enabled)) ? 1 : 0,
       totals.vatRate,
       totals.vat,
       totals.total,
@@ -374,7 +397,7 @@ export function invoiceToPdfInput(invoice: RowDataPacket, items: RowDataPacket[]
     })),
     subtotal: Number(invoice.subtotal_zar),
     discount: Number(invoice.discount_zar),
-    vatEnabled: Boolean(invoice.vat_enabled),
+    vatEnabled: asBool(invoice.vat_enabled),
     vatRate: Number(invoice.vat_rate),
     vat: Number(invoice.vat_zar),
     total: Number(invoice.total_zar),
