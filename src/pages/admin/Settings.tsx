@@ -221,10 +221,7 @@ export default function AdminSettings() {
                   <Label>Default Currency</Label>
                   <Input defaultValue="ZAR" disabled />
                 </div>
-                <div className="space-y-2">
-                  <Label>Secondary Currency</Label>
-                  <Input defaultValue="USD" disabled />
-                </div>
+
               </div>
               <Button className="btn-sunset">Save Changes</Button>
             </CardContent>

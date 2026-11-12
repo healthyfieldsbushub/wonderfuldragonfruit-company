@@ -1752,7 +1752,10 @@ async function createPayPalCheckout(body: Record<string, any>) {
         {
           reference_id: localOrder.order_number,
           amount: {
-            currency_code: String(localOrder.currency || "USD"),
+            // The value below is total_zar, so the currency is ZAR by definition.
+            // A USD fallback here would present the rand figure to PayPal as US
+            // dollars - roughly 18x the intended charge - so it is hard-coded.
+            currency_code: "ZAR",
             value: Number(localOrder.total_zar).toFixed(2),
           },
         },
@@ -2289,12 +2292,6 @@ async function handleFunction(name: string, body: Record<string, any>, req: Requ
   if (name === "social-status") return getSocialStatus();
   if (name === "facebook-publish") return publishFacebookPage(body);
   if (name === "instagram-publish") return publishInstagram(body);
-  if (name === "currency-convert") {
-    const action = String(req.query.action || "rates");
-    const rates = { ZAR_TO_USD: 0.055, USD_TO_ZAR: 18.18 };
-    if (action === "convert") { const amount = Number(req.query.amount || body.amount || 0); const from = String(req.query.from || body.from); const to = String(req.query.to || body.to); return { converted: { amount: from === "ZAR" && to === "USD" ? amount * rates.ZAR_TO_USD : from === "USD" && to === "ZAR" ? amount * rates.USD_TO_ZAR : amount } }; }
-    return { rates };
-  }
   if (name === "create-order") return createOrderFromCart(body);
   if (name === "ai-orchestrator" && ["google_ai_studio", "gemini", "vertex_ai"].includes(String(body.provider || "").toLowerCase())) return callGoogleGemini(body);
   if (["serpapi-gateway", "google-geocode", "google-places", "google-routes", "youtube-search"].includes(name) && !(await hasAdminPasswordAccess(req))) throw new Error("Verified admin access is required for Google provider tools");

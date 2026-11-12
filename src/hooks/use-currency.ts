@@ -1,63 +1,39 @@
-import { useState, useEffect } from "react";
-import { getCurrencyRates, CurrencyRates } from "@/lib/api";
+import { useState } from "react";
 
-export type Currency = "ZAR" | "USD";
+/**
+ * Currency for the whole storefront.
+ *
+ * Every price on this site is quoted, invoiced and charged in South African Rand.
+ * There is deliberately no conversion: showing a customer a converted figure while
+ * charging them in ZAR would misrepresent the amount they actually pay, and the
+ * payment gateways are all settled in ZAR.
+ *
+ * This hook used to offer a USD display mode backed by a live exchange rate. That
+ * path is removed, so no caller can render a "$" figure.
+ */
+export type Currency = "ZAR";
+
+const zarFormatter = new Intl.NumberFormat("en-ZA", {
+  style: "currency",
+  currency: "ZAR",
+});
 
 export function useCurrency() {
-  const [currency, setCurrency] = useState<Currency>("ZAR");
-  const [rates, setRates] = useState<CurrencyRates>({ ZAR_TO_USD: 0.055, USD_TO_ZAR: 18.18 });
-  const [loading, setLoading] = useState(true);
+  // Kept as state so callers that destructure `currency` keep working unchanged.
+  const [currency] = useState<Currency>("ZAR");
 
-  useEffect(() => {
-    // Load saved currency preference
-    const saved = localStorage.getItem("preferredCurrency") as Currency;
-    if (saved) {
-      setCurrency(saved);
-    }
+  const formatPrice = (priceInZar: number, _displayCurrency?: Currency): string =>
+    zarFormatter.format(Number(priceInZar) || 0);
 
-    // Fetch current exchange rates
-    getCurrencyRates()
-      .then(setRates)
-      .finally(() => setLoading(false));
-  }, []);
-
-  const changeCurrency = (newCurrency: Currency) => {
-    setCurrency(newCurrency);
-    localStorage.setItem("preferredCurrency", newCurrency);
-  };
-
-  const formatPrice = (priceInZar: number, displayCurrency?: Currency): string => {
-    const curr = displayCurrency || currency;
-    
-    if (curr === "USD") {
-      const usdPrice = priceInZar * rates.ZAR_TO_USD;
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-      }).format(usdPrice);
-    }
-    
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency: "ZAR",
-    }).format(priceInZar);
-  };
-
-  const convertToZar = (amount: number, fromCurrency: Currency): number => {
-    if (fromCurrency === "ZAR") return amount;
-    return amount * rates.USD_TO_ZAR;
-  };
-
-  const convertFromZar = (amount: number, toCurrency: Currency): number => {
-    if (toCurrency === "ZAR") return amount;
-    return amount * rates.ZAR_TO_USD;
-  };
+  // Amounts are already in rand, so these are identity conversions. They remain so
+  // existing callers do not break, but they can no longer produce a USD figure.
+  const convertToZar = (amount: number): number => Number(amount) || 0;
+  const convertFromZar = (amount: number): number => Number(amount) || 0;
 
   return {
     currency,
-    rates,
-    loading,
-    changeCurrency,
+    loading: false,
+    changeCurrency: (_next: Currency) => {},
     formatPrice,
     convertToZar,
     convertFromZar,

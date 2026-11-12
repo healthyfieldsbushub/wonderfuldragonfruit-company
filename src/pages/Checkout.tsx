@@ -999,11 +999,7 @@ const Checkout = () => {
                     <span className="text-gradient-sunset">{formatPrice(total)}</span>
                   </div>
 
-                  {currency === "USD" && (
-                    <p className="text-xs text-muted-foreground text-center">
-                      * Prices converted from ZAR. Payment processed in ZAR.
-                    </p>
-                  )}
+
                 </CardContent>
               </Card>
             </div>

@@ -40,10 +40,6 @@ export interface PudoLocker {
   availableSlots: number;
 }
 
-export interface CurrencyRates {
-  ZAR_TO_USD: number;
-  USD_TO_ZAR: number;
-}
 
 // Get shipping rates
 export async function getShippingRates(
@@ -107,47 +103,6 @@ export async function getPudoLockers(postalCode: string): Promise<PudoLocker[]> 
   }
 }
 
-// Get currency exchange rates
-export async function getCurrencyRates(): Promise<CurrencyRates> {
-  try {
-    const response = await fetch(
-      `${MANUS_URL}/functions/currency-convert?action=rates`
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch currency rates");
-    }
-
-    const data = await response.json();
-    return data.rates || { ZAR_TO_USD: 0.055, USD_TO_ZAR: 18.18 };
-  } catch (error) {
-    console.error("Currency rates error:", error);
-    return { ZAR_TO_USD: 0.055, USD_TO_ZAR: 18.18 };
-  }
-}
-
-// Convert currency
-export async function convertCurrency(
-  amount: number,
-  from: "ZAR" | "USD",
-  to: "ZAR" | "USD"
-): Promise<number> {
-  try {
-    const response = await fetch(
-      `${MANUS_URL}/functions/currency-convert?action=convert&amount=${amount}&from=${from}&to=${to}`
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to convert currency");
-    }
-
-    const data = await response.json();
-    return data.converted?.amount || amount;
-  } catch (error) {
-    console.error("Currency conversion error:", error);
-    return amount;
-  }
-}
 
 // PayFast payment response type
 
