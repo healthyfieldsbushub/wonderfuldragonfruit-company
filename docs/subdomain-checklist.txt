@@ -1,0 +1,200 @@
+WONDERFUL DRAGON FRUIT SOUTH AFRICA - COUNTRY SUBDOMAIN MASTER LIST
+Updated: 11 November 2026 | 46 country subdomains
+
+============================================================================
+PART 1 - DNS RECORDS TO ADD AT NAME.COM (19 NEW - the other 27 are done)
+============================================================================
+
+Add these CNAME records. Hostname = the part BEFORE .wonderfuldragonfruit.company
+
+Type   Hostname  Value                               Country
+----------------------------------------------------------------------------
+CNAME  us        wonderfuldragonfruit.company        United States
+CNAME  ca        wonderfuldragonfruit.company        Canada
+CNAME  au        wonderfuldragonfruit.company        Australia
+CNAME  nz        wonderfuldragonfruit.company        New Zealand
+CNAME  gb        wonderfuldragonfruit.company        United Kingdom
+CNAME  de        wonderfuldragonfruit.company        Germany
+CNAME  fr        wonderfuldragonfruit.company        France
+CNAME  nl        wonderfuldragonfruit.company        Netherlands
+CNAME  es        wonderfuldragonfruit.company        Spain
+CNAME  it        wonderfuldragonfruit.company        Italy
+CNAME  ch        wonderfuldragonfruit.company        Switzerland
+CNAME  se        wonderfuldragonfruit.company        Sweden
+CNAME  no        wonderfuldragonfruit.company        Norway
+CNAME  dk        wonderfuldragonfruit.company        Denmark
+CNAME  ie        wonderfuldragonfruit.company        Ireland
+CNAME  pl        wonderfuldragonfruit.company        Poland
+CNAME  pt        wonderfuldragonfruit.company        Portugal
+CNAME  be        wonderfuldragonfruit.company        Belgium
+CNAME  at        wonderfuldragonfruit.company        Austria
+
+Already added and verified (no action needed):
+  za ae ng ke gh eg ma rw ug et ci sn cm na bw zw mz zm mw ls sz mg mu sc ao cd tz
+
+============================================================================
+PART 2 - HOSTNAMES TO ADD IN THE MANUS DASHBOARD (all 46)
+============================================================================
+
+Add each as a custom domain on the www.wonderfuldragonfruit.company
+project. Wait for 'Active' before the country site works over HTTPS.
+
+ 1. za.wonderfuldragonfruit.company                                  (South Africa)
+ 2. ae.wonderfuldragonfruit.company                                  (United Arab Emirates)
+ 3. ng.wonderfuldragonfruit.company                                  (Nigeria)
+ 4. ke.wonderfuldragonfruit.company                                  (Kenya)
+ 5. gh.wonderfuldragonfruit.company                                  (Ghana)
+ 6. eg.wonderfuldragonfruit.company                                  (Egypt)
+ 7. ma.wonderfuldragonfruit.company                                  (Morocco)
+ 8. rw.wonderfuldragonfruit.company                                  (Rwanda)
+ 9. ug.wonderfuldragonfruit.company                                  (Uganda)
+10. et.wonderfuldragonfruit.company                                  (Ethiopia)
+11. ci.wonderfuldragonfruit.company                                  (Cote d'Ivoire)
+12. sn.wonderfuldragonfruit.company                                  (Senegal)
+13. cm.wonderfuldragonfruit.company                                  (Cameroon)
+14. na.wonderfuldragonfruit.company                                  (Namibia)
+15. bw.wonderfuldragonfruit.company                                  (Botswana)
+16. zw.wonderfuldragonfruit.company                                  (Zimbabwe)
+17. mz.wonderfuldragonfruit.company                                  (Mozambique)
+18. zm.wonderfuldragonfruit.company                                  (Zambia)
+19. mw.wonderfuldragonfruit.company                                  (Malawi)
+20. ls.wonderfuldragonfruit.company                                  (Lesotho)
+21. sz.wonderfuldragonfruit.company                                  (Eswatini)
+22. mg.wonderfuldragonfruit.company                                  (Madagascar)
+23. mu.wonderfuldragonfruit.company                                  (Mauritius)
+24. sc.wonderfuldragonfruit.company                                  (Seychelles)
+25. ao.wonderfuldragonfruit.company                                  (Angola)
+26. cd.wonderfuldragonfruit.company                                  (DR Congo)
+27. tz.wonderfuldragonfruit.company                                  (Tanzania)
+28. us.wonderfuldragonfruit.company                                  (United States)
+29. ca.wonderfuldragonfruit.company                                  (Canada)
+30. au.wonderfuldragonfruit.company                                  (Australia)
+31. nz.wonderfuldragonfruit.company                                  (New Zealand)
+32. gb.wonderfuldragonfruit.company                                  (United Kingdom)
+33. de.wonderfuldragonfruit.company                                  (Germany)
+34. fr.wonderfuldragonfruit.company                                  (France)
+35. nl.wonderfuldragonfruit.company                                  (Netherlands)
+36. es.wonderfuldragonfruit.company                                  (Spain)
+37. it.wonderfuldragonfruit.company                                  (Italy)
+38. ch.wonderfuldragonfruit.company                                  (Switzerland)
+39. se.wonderfuldragonfruit.company                                  (Sweden)
+40. no.wonderfuldragonfruit.company                                  (Norway)
+41. dk.wonderfuldragonfruit.company                                  (Denmark)
+42. ie.wonderfuldragonfruit.company                                  (Ireland)
+43. pl.wonderfuldragonfruit.company                                  (Poland)
+44. pt.wonderfuldragonfruit.company                                  (Portugal)
+45. be.wonderfuldragonfruit.company                                  (Belgium)
+46. at.wonderfuldragonfruit.company                                  (Austria)
+
+Already active: wonderfuldragonfruit.company  |  www.wonderfuldragonfruit.company
+
+============================================================================
+PART 3 - FULL HTTPS URLS (46 country sites)
+============================================================================
+
+https://za.wonderfuldragonfruit.company
+https://ae.wonderfuldragonfruit.company
+https://ng.wonderfuldragonfruit.company
+https://ke.wonderfuldragonfruit.company
+https://gh.wonderfuldragonfruit.company
+https://eg.wonderfuldragonfruit.company
+https://ma.wonderfuldragonfruit.company
+https://rw.wonderfuldragonfruit.company
+https://ug.wonderfuldragonfruit.company
+https://et.wonderfuldragonfruit.company
+https://ci.wonderfuldragonfruit.company
+https://sn.wonderfuldragonfruit.company
+https://cm.wonderfuldragonfruit.company
+https://na.wonderfuldragonfruit.company
+https://bw.wonderfuldragonfruit.company
+https://zw.wonderfuldragonfruit.company
+https://mz.wonderfuldragonfruit.company
+https://zm.wonderfuldragonfruit.company
+https://mw.wonderfuldragonfruit.company
+https://ls.wonderfuldragonfruit.company
+https://sz.wonderfuldragonfruit.company
+https://mg.wonderfuldragonfruit.company
+https://mu.wonderfuldragonfruit.company
+https://sc.wonderfuldragonfruit.company
+https://ao.wonderfuldragonfruit.company
+https://cd.wonderfuldragonfruit.company
+https://tz.wonderfuldragonfruit.company
+https://us.wonderfuldragonfruit.company
+https://ca.wonderfuldragonfruit.company
+https://au.wonderfuldragonfruit.company
+https://nz.wonderfuldragonfruit.company
+https://gb.wonderfuldragonfruit.company
+https://de.wonderfuldragonfruit.company
+https://fr.wonderfuldragonfruit.company
+https://nl.wonderfuldragonfruit.company
+https://es.wonderfuldragonfruit.company
+https://it.wonderfuldragonfruit.company
+https://ch.wonderfuldragonfruit.company
+https://se.wonderfuldragonfruit.company
+https://no.wonderfuldragonfruit.company
+https://dk.wonderfuldragonfruit.company
+https://ie.wonderfuldragonfruit.company
+https://pl.wonderfuldragonfruit.company
+https://pt.wonderfuldragonfruit.company
+https://be.wonderfuldragonfruit.company
+https://at.wonderfuldragonfruit.company
+
+============================================================================
+PART 4 - SITEMAP URLS FOR GOOGLE SEARCH CONSOLE / BING (47)
+============================================================================
+
+https://wonderfuldragonfruit.company/sitemap.xml
+https://za.wonderfuldragonfruit.company/sitemap.xml
+https://ae.wonderfuldragonfruit.company/sitemap.xml
+https://ng.wonderfuldragonfruit.company/sitemap.xml
+https://ke.wonderfuldragonfruit.company/sitemap.xml
+https://gh.wonderfuldragonfruit.company/sitemap.xml
+https://eg.wonderfuldragonfruit.company/sitemap.xml
+https://ma.wonderfuldragonfruit.company/sitemap.xml
+https://rw.wonderfuldragonfruit.company/sitemap.xml
+https://ug.wonderfuldragonfruit.company/sitemap.xml
+https://et.wonderfuldragonfruit.company/sitemap.xml
+https://ci.wonderfuldragonfruit.company/sitemap.xml
+https://sn.wonderfuldragonfruit.company/sitemap.xml
+https://cm.wonderfuldragonfruit.company/sitemap.xml
+https://na.wonderfuldragonfruit.company/sitemap.xml
+https://bw.wonderfuldragonfruit.company/sitemap.xml
+https://zw.wonderfuldragonfruit.company/sitemap.xml
+https://mz.wonderfuldragonfruit.company/sitemap.xml
+https://zm.wonderfuldragonfruit.company/sitemap.xml
+https://mw.wonderfuldragonfruit.company/sitemap.xml
+https://ls.wonderfuldragonfruit.company/sitemap.xml
+https://sz.wonderfuldragonfruit.company/sitemap.xml
+https://mg.wonderfuldragonfruit.company/sitemap.xml
+https://mu.wonderfuldragonfruit.company/sitemap.xml
+https://sc.wonderfuldragonfruit.company/sitemap.xml
+https://ao.wonderfuldragonfruit.company/sitemap.xml
+https://cd.wonderfuldragonfruit.company/sitemap.xml
+https://tz.wonderfuldragonfruit.company/sitemap.xml
+https://us.wonderfuldragonfruit.company/sitemap.xml
+https://ca.wonderfuldragonfruit.company/sitemap.xml
+https://au.wonderfuldragonfruit.company/sitemap.xml
+https://nz.wonderfuldragonfruit.company/sitemap.xml
+https://gb.wonderfuldragonfruit.company/sitemap.xml
+https://de.wonderfuldragonfruit.company/sitemap.xml
+https://fr.wonderfuldragonfruit.company/sitemap.xml
+https://nl.wonderfuldragonfruit.company/sitemap.xml
+https://es.wonderfuldragonfruit.company/sitemap.xml
+https://it.wonderfuldragonfruit.company/sitemap.xml
+https://ch.wonderfuldragonfruit.company/sitemap.xml
+https://se.wonderfuldragonfruit.company/sitemap.xml
+https://no.wonderfuldragonfruit.company/sitemap.xml
+https://dk.wonderfuldragonfruit.company/sitemap.xml
+https://ie.wonderfuldragonfruit.company/sitemap.xml
+https://pl.wonderfuldragonfruit.company/sitemap.xml
+https://pt.wonderfuldragonfruit.company/sitemap.xml
+https://be.wonderfuldragonfruit.company/sitemap.xml
+https://at.wonderfuldragonfruit.company/sitemap.xml
+
+============================================================================
+PART 5 - OPTIONAL CITY SUBDOMAINS (not created yet)
+============================================================================
+
+City-level tenants are possible later (e.g. jnb.za.wonderfuldragonfruit.company
+or jnb.wonderfuldragonfruit.company). They are deliberately NOT created now
+because each needs its own city content to avoid thin/duplicate pages.
