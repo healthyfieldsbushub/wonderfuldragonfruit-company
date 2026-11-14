@@ -42,6 +42,8 @@ export type IssuedDownload = {
   url: string;
   expiresAt: string | null;
   maxDownloads: number;
+  /** The formats this purchase includes, e.g. ["PDF", "EPUB"]. */
+  formats?: string[];
 };
 
 /** A fresh, unguessable download token. */
@@ -104,18 +106,24 @@ export async function issueDigitalEntitlements(
   order: { id: string; orderNumber?: string | null; email: string; reissueCount?: number }
 ): Promise<IssuedDownload[]> {
   const existing = await query<RowDataPacket[]>(
-    "SELECT token, product_name, max_downloads, expires_at FROM digital_downloads WHERE order_id = ? AND revoked = 0",
+    "SELECT token, product_id, product_name, max_downloads, expires_at FROM digital_downloads WHERE order_id = ? AND revoked = 0",
     [order.id]
   );
   const rows = existing as unknown as Array<Record<string, unknown>>;
   if (rows.length) {
-    return rows.map((r) => ({
-      token: String(r.token),
-      productName: String(r.product_name || "Digital download"),
-      url: downloadUrl(String(r.token)),
-      expiresAt: r.expires_at ? new Date(r.expires_at as string).toISOString() : null,
-      maxDownloads: Number(r.max_downloads) || DEFAULT_DOWNLOAD_LIMIT,
-    }));
+    const out: IssuedDownload[] = [];
+    for (const r of rows) {
+      const formats = await formatsForProduct(query, String(r.product_id));
+      out.push({
+        token: String(r.token),
+        productName: String(r.product_name || "Digital download"),
+        url: downloadUrl(String(r.token)),
+        expiresAt: r.expires_at ? new Date(r.expires_at as string).toISOString() : null,
+        maxDownloads: Number(r.max_downloads) || DEFAULT_DOWNLOAD_LIMIT,
+        formats: formats.map((f) => f.format),
+      });
+    }
+    return out;
   }
 
   const lines = await digitalLinesForOrder(query, order.id);
@@ -135,12 +143,14 @@ export async function issueDigitalEntitlements(
       [token, order.id, order.orderNumber || null, line.productId, line.productName,
        order.email, line.downloadLimit, expiresAt, Math.max(0, Number(order.reissueCount) || 0)]
     );
+    const formats = await formatsForProduct(query, line.productId);
     issued.push({
       token,
       productName: line.productName,
       url: downloadUrl(token),
       expiresAt: expiresAt ? expiresAt.toISOString() : null,
       maxDownloads: line.downloadLimit,
+      formats: formats.map((f) => f.format),
     });
   }
   return issued;
@@ -150,18 +160,92 @@ export function downloadUrl(token: string): string {
   return `${publicOrigin()}/download/${token}`;
 }
 
+/** One file a buyer can take from a single purchase. */
+export type DigitalFormat = {
+  format: string;
+  fileKey: string;
+  fileName: string;
+  fileSize: number | null;
+  label: string | null;
+};
+
 export type DownloadCheck =
-  | { ok: true; id: number; token: string; productName: string; fileKey: string; fileName: string; fileFormat: string | null; remaining: number }
-  | { ok: false; reason: string; status: number };
+  | {
+      ok: true;
+      id: number;
+      token: string;
+      productName: string;
+      fileKey: string;
+      fileName: string;
+      fileFormat: string | null;
+      remaining: number;
+      /** Every format available on this purchase, so the page can offer them all. */
+      formats: DigitalFormat[];
+      /** The format this request resolved to. */
+      selectedFormat: string;
+    }
+  | { ok: false; reason: string; status: number; productName?: string; formats?: DigitalFormat[] };
+
+/**
+ * Every file a product offers, newest structure first and the single legacy
+ * file as a fallback. A title with no rows in digital_product_files still
+ * delivers exactly as it did before this feature existed.
+ */
+export async function formatsForProduct(query: QueryFn, productId: string): Promise<DigitalFormat[]> {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT format, file_key, file_name, file_size, label
+       FROM digital_product_files
+      WHERE product_id = ?
+      ORDER BY sort_order ASC, id ASC`,
+    [productId]
+  );
+  const out = (rows as unknown as Array<Record<string, unknown>>)
+    .filter((r) => r.file_key)
+    .map((r) => ({
+      format: String(r.format || "PDF").toUpperCase(),
+      fileKey: String(r.file_key),
+      fileName: String(r.file_name || `download.${String(r.format || "pdf").toLowerCase()}`),
+      fileSize: r.file_size == null ? null : Number(r.file_size),
+      label: r.label ? String(r.label) : null,
+    }));
+  if (out.length) return out;
+
+  const legacy = await query<RowDataPacket[]>(
+    "SELECT digital_file_key, digital_file_name, digital_file_size, digital_file_format FROM products WHERE id = ? LIMIT 1",
+    [productId]
+  );
+  const row = (legacy as unknown as Array<Record<string, unknown>>)[0];
+  if (!row || !row.digital_file_key) return [];
+  return [{
+    format: String(row.digital_file_format || "PDF").toUpperCase(),
+    fileKey: String(row.digital_file_key),
+    fileName: String(row.digital_file_name || "download.pdf"),
+    fileSize: row.digital_file_size == null ? null : Number(row.digital_file_size),
+    label: null,
+  }];
+}
+
+/**
+ * How many times this token has already served a specific format. Each format
+ * has its own allowance, so taking the PDF does not spend the EPUB.
+ */
+export async function formatUseCount(query: QueryFn, downloadId: number, format: string): Promise<number> {
+  const rows = await query<RowDataPacket[]>(
+    "SELECT COUNT(*) AS n FROM digital_download_events WHERE download_id = ? AND outcome = 'ok' AND format = ?",
+    [downloadId, format]
+  );
+  const row = (rows as unknown as Array<Record<string, unknown>>)[0] || {};
+  return Number(row.n) || 0;
+}
 
 /**
  * Validate a download token. Reports a specific, honest reason for every
  * rejection so support can tell an expired link from an exhausted one.
  */
-export async function resolveDownload(query: QueryFn, token: string): Promise<DownloadCheck> {
+export async function resolveDownload(query: QueryFn, token: string, requestedFormat?: string): Promise<DownloadCheck> {
   if (!/^[a-f0-9]{64}$/.test(token)) return { ok: false, reason: "That download link is not valid.", status: 400 };
   const rows = await query<RowDataPacket[]>(
-    `SELECT d.id, d.token, d.product_name, d.download_count, d.max_downloads,
+    `SELECT d.id, d.token, d.product_id, d.product_name, d.download_count, d.max_downloads,
             d.expires_at, d.revoked,
             p.digital_file_key, p.digital_file_name, p.digital_file_format
        FROM digital_downloads d
@@ -177,21 +261,41 @@ export async function resolveDownload(query: QueryFn, token: string): Promise<Do
   }
   const used = Number(row.download_count) || 0;
   const max = Number(row.max_downloads) || DEFAULT_DOWNLOAD_LIMIT;
-  if (used >= max) {
-    return { ok: false, reason: `This download link has reached its limit of ${max} downloads. Please contact us and we will reissue it.`, status: 429 };
-  }
-  if (!row.digital_file_key) {
+  const productName = String(row.product_name || "Digital download");
+  const formats = await formatsForProduct(query, String(row.product_id));
+  if (!formats.length) {
     return { ok: false, reason: "The file for this purchase has not been uploaded yet. Please contact us.", status: 503 };
   }
+
+  // Each format has its own allowance drawn from the same purchase limit, so a
+  // buyer can take the PDF and the EPUB without one cancelling the other.
+  const wanted = requestedFormat ? String(requestedFormat).toUpperCase() : null;
+  const selected = wanted ? formats.find((f) => f.format === wanted) : formats[0];
+  if (!selected) {
+    return { ok: false, reason: `This book is not available in ${wanted}. Please choose one of the formats offered.`, status: 404, productName, formats };
+  }
+  const usedForFormat = await formatUseCount(query, Number(row.id), selected.format);
+  if (usedForFormat >= max) {
+    return {
+      ok: false,
+      reason: `You have already downloaded the ${selected.format} version ${max} time${max === 1 ? "" : "s"}, which is this link's limit. Please contact us and we will reissue it.`,
+      status: 429,
+      productName,
+      formats,
+    };
+  }
+
   return {
     ok: true,
     id: Number(row.id),
     token: String(row.token),
-    productName: String(row.product_name || "Digital download"),
-    fileKey: String(row.digital_file_key),
-    fileName: String(row.digital_file_name || "download.pdf"),
-    fileFormat: row.digital_file_format ? String(row.digital_file_format) : null,
-    remaining: max - used,
+    productName,
+    fileKey: selected.fileKey,
+    fileName: selected.fileName,
+    fileFormat: selected.format,
+    remaining: Math.max(0, max - usedForFormat),
+    formats,
+    selectedFormat: selected.format,
   };
 }
 
@@ -201,11 +305,12 @@ export async function recordDownloadEvent(
   token: string | null,
   ip: string | null,
   userAgent: string | null,
-  outcome: string
+  outcome: string,
+  format: string | null = null
 ): Promise<void> {
   await query<ResultSetHeader>(
-    "INSERT INTO digital_download_events (download_id, token, ip, user_agent, outcome) VALUES (?, ?, ?, ?, ?)",
-    [downloadId, token, ip ? ip.slice(0, 64) : null, userAgent ? userAgent.slice(0, 255) : null, outcome]
+    "INSERT INTO digital_download_events (download_id, token, ip, user_agent, outcome, format) VALUES (?, ?, ?, ?, ?, ?)",
+    [downloadId, token, ip ? ip.slice(0, 64) : null, userAgent ? userAgent.slice(0, 255) : null, outcome, format]
   );
 }
 
@@ -243,7 +348,10 @@ export function digitalEmailBody(options: {
   const rows = options.downloads
     .map(
       (d) => `<tr>
-        <td style="padding:10px 12px;border-bottom:1px solid #eee;">${d.productName}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #eee;">
+          ${d.productName}
+          ${d.formats && d.formats.length ? `<br><span style="color:#666;font-size:12px;">Includes: ${d.formats.join(" and ")}</span>` : ""}
+        </td>
         <td style="padding:10px 12px;border-bottom:1px solid #eee;">
           <a href="${d.url}" style="background:#2f6b3a;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none;">Download</a>
         </td>

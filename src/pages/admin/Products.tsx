@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import EbookFormats from '@/components/admin/EbookFormats';
 import {
   Dialog,
   DialogContent,
@@ -923,33 +924,12 @@ export default function AdminProducts() {
 
                 {form.is_digital && (
                   <div className="space-y-4 border-t pt-4">
-                    <Field
-                      label="Download file (PDF, EPUB or ZIP)"
-                      hint="Upload the finished ebook. Customers only ever receive a secure link, never the file location."
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="file"
-                          accept=".pdf,.epub,.zip,application/pdf,application/epub+zip,application/zip"
-                          onChange={handleDigitalUpload}
-                          disabled={uploadingDigital}
-                          className="text-sm"
-                        />
-                        {uploadingDigital && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-                      </div>
-                    </Field>
-
-                    {form.digital_file_key ? (
-                      <p className="text-xs text-muted-foreground">
-                        Uploaded: <span className="font-medium">{form.digital_file_name || 'file'}</span>
-                        {form.digital_file_size ? ` (${(parseInt(form.digital_file_size) / 1048576).toFixed(2)} MB)` : ''}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-amber-600">No file uploaded yet — a digital product cannot be saved without one.</p>
-                    )}
+                    {/* Files live in their own table so a title can ship a PDF and
+                        an EPUB from one purchase and one download link. */}
+                    <EbookFormats productId={editingId || ''} />
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <Field label="Downloads allowed per purchase" hint="How many times one buyer may download this file. Default 5.">
+                      <Field label="Downloads allowed per format" hint="How many times one buyer may download each format. Default 5. Taking the PDF does not use up the EPUB.">
                         <Input
                           type="number"
                           min="1"

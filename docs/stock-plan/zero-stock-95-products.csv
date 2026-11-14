@@ -1,0 +1,96 @@
+sku,name,category,product_type,price_zar,stock,allow_backorder,slug,digital,suggested_stock,reason
+HF-BUS-AFM-001,Agricultural Funding Manual & Contact Directory,Consulting & Business Resources,service_or_digital,250.00,0,1,agricultural-funding-manual-and-contact-directory,no,0,Service or digital — no stock to hold; keep backorder on
+HF-CON-VID-001,Video Consultation,Consulting & Business Resources,service_or_digital,250.00,0,1,video-consultation,no,0,Service or digital — no stock to hold; keep backorder on
+HF-CON-FVC-001,Farm Visit & Consultation Package,Consulting & Business Resources,service_or_digital,850.00,0,1,farm-visit-and-consultation-package,no,0,Service or digital — no stock to hold; keep backorder on
+HF-CON-PGC-001,Premium Genetics Consultation,Consulting & Business Resources,service_or_digital,850.00,0,1,premium-genetics-consultation,no,0,Service or digital — no stock to hold; keep backorder on
+HF-BUS-1HA-001,1 Hectare Dragon Fruit Business Plan,Consulting & Business Resources,service_or_digital,1500.00,0,1,1-hectare-dragon-fruit-business-plan,no,0,Service or digital — no stock to hold; keep backorder on
+HF-BUS-2HA-001,2 Hectare Dragon Fruit Business Plan,Consulting & Business Resources,service_or_digital,1500.00,0,1,2-hectare-dragon-fruit-business-plan,no,0,Service or digital — no stock to hold; keep backorder on
+HF-BUS-3HA-001,3 Hectare Dragon Fruit Business Plan,Consulting & Business Resources,service_or_digital,1500.00,0,1,3-hectare-dragon-fruit-business-plan,no,0,Service or digital — no stock to hold; keep backorder on
+HF-BUS-5HA-001,5 Hectare Dragon Fruit Business Plan,Consulting & Business Resources,service_or_digital,1500.00,0,1,5-hectare-dragon-fruit-business-plan,no,0,Service or digital — no stock to hold; keep backorder on
+HF-MEM-DFA-1M,"Dragon Fruit Association Membership (1, 3, or 6 Months)",Consulting & Business Resources,service_or_digital,3000.00,0,1,dragon-fruit-association-membership-1-3-or-6-months,no,0,Service or digital — no stock to hold; keep backorder on
+HF-DRA-VJN-001,Vietnamese Jaina,Dragon Fruit Plants & Cuttings,cultivar_plant,320.00,0,1,vietnamese-jaina,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-RBR-001,Ruby Red,Dragon Fruit Plants & Cuttings,cultivar_plant,350.00,0,1,ruby-red,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-ALS-001,Alice Sweet,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,alice-sweet,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AMB-001,American Beauty,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,american-beauty,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AZP-001,Arizona Purple,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,arizona-purple,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-ARM-001,Armando,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,armando,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AS1-001,Asunta 1,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,asunta-1,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AS2-001,Asunta 2,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,asunta-2,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AS3-001,Asunta 3,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,asunta-3,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AS5-001,Asunta 5,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,asunta-5,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-AX-001,Ax,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,ax,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-BCR-001,Baby Cerrado,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,baby-cerrado,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-BHM-001,Bahamut,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,bahamut,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-BLM-001,Bloody Mary,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,bloody-mary,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-BRD-001,Boreal Red,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,boreal-red,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-BRU-001,Bruni,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,bruni,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-BRH-001,Bundy Red Hybrid,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,bundy-red-hybrid,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-CND-001,Condor,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,condor,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-CNM-001,Connie Mayer,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,connie-mayer,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-CSC-001,Cosmic Charlie,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,cosmic-charlie,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-DKS-001,Dark Star,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,dark-star,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-DVB-001,David Bowie,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,david-bowie,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-DLG-001,Delight,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,delight,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-HLC-001,Halleys Comet,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,halleys-comet,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-HRP-001,Harpua,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,harpua,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-HWR-001,Hawaiian Red,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,hawaiian-red,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-HLB-001,Hells Boy,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,hells-boy,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-HGH-001,Houghton,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,houghton,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-KKG-001,King Kong,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,king-kong,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-LAT-001,Lake Atitlan,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,lake-atitlan,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-M1-001,M1,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,m1,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-MKS-001,Makisupa,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,makisupa,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-MRS-001,Maria Rosa,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,maria-rosa,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-ORE-001,Orejona,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,orejona,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-PTH-001,Paul Thompson,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,paul-thompson,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-PHG-001,Physical Graffiti,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,physical-graffiti,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-PHZ-001,Purple Haze,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,purple-haze,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-PMG-001,Purple Megalanthus,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,purple-megalanthus,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-RCR-001,Red Crystal,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,red-crystal,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-RJN-001,Red Jaina,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,red-jaina,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-RIX-001,Rixford,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,rixford,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-SET-001,S. Setaceus,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,s-setaceus,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-SKT-001,Seoul Kitchen,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,seoul-kitchen,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-SES-001,Sin Espinas,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,sin-espinas,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-SDS-001,Sugar Dragon S8,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,sugar-dragon-s8,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-SSH-001,Super Shenro,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,super-shenro,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-THK-001,Thick King,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,thick-king,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-TWP-001,Townsend Pink,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,townsend-pink,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-TRC-001,Tricia,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,tricia,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-TRD-001,Trish Red,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,trish-red,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-VLR-001,Valdivia Roja,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,valdivia-roja,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-VDC-001,Voodoo Child,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,voodoo-child,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-WCR-001,White Crystal,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,white-crystal,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-WKH-001,White King Hollywood,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,white-king-hollywood,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-WSF-001,White Sapphire,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,white-sapphire,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-WSP-001,White Supreme,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,white-supreme,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-ZAM-001,Zamorano,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,zamorano,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-ZRR-001,Zorro,Dragon Fruit Plants & Cuttings,cultivar_plant,400.00,0,1,zorro,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-CHM-001,Chameleon,Dragon Fruit Plants & Cuttings,cultivar_plant,600.00,0,1,chameleon,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-DSP-001,Desert Princess,Dragon Fruit Plants & Cuttings,cultivar_plant,600.00,0,1,desert-princess,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-EDB-001,Edgars Baby,Dragon Fruit Plants & Cuttings,cultivar_plant,600.00,0,1,edgars-baby,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-RNB-001,Rainbow,Dragon Fruit Plants & Cuttings,cultivar_plant,600.00,0,1,rainbow,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-VGR-001,Vietnam Green Skin Red Flesh,Dragon Fruit Plants & Cuttings,cultivar_plant,600.00,0,1,vietnam-green-skin-red-flesh,no,25,Cultivar plant — stock 25 rooted plants
+HF-YEL-ECP-001,Ecuador Palora,Dragon Fruit Plants & Cuttings,cultivar_plant,800.00,0,1,ecuador-palora,no,25,Cultivar plant — stock 25 rooted plants
+HF-DRA-LLV-CUT,Lemon Lime Variegated Dragon Fruit Unrooted Cutting,Dragon Fruit Plants & Cuttings,cutting,1000.00,0,1,lemon-lime-variegated-dragon-fruit-unrooted-cutting,no,40,Cutting — stock 40 cuttings
+HF-DRA-RGC-001,Red Green Chimera,Dragon Fruit Plants & Cuttings,cultivar_plant,1000.00,0,1,red-green-chimera,no,25,Cultivar plant — stock 25 rooted plants
+HF-YEL-AMA-001,Yellow Amarillo,Dragon Fruit Plants & Cuttings,cultivar_plant,1000.00,0,1,yellow-amarillo,no,25,Cultivar plant — stock 25 rooted plants
+HF-YEL-YPH-001,Yellow Phalora,Dragon Fruit Plants & Cuttings,cultivar_plant,1000.00,0,1,yellow-phalora,no,25,Cultivar plant — stock 25 rooted plants
+HF-YEL-PGL-001,Pure Gold,Dragon Fruit Plants & Cuttings,cultivar_plant,2000.00,0,1,pure-gold,no,25,Cultivar plant — stock 25 rooted plants
+HF-PLA-RBR-150,Ruby Retail 150 Plant Tray,Dragon Fruit Plants & Cuttings,plant_tray,5700.00,0,1,ruby-retail-150-plant-tray,no,2,Plant tray — stock in trays of 2
+HF-PLA-RUB-TRAY,Ruby Red Wholesale Plant Trays (50 – 1000 Plants),Dragon Fruit Plants & Cuttings,plant_tray,26000.00,0,1,ruby-red-wholesale-plant-trays-50-1000-plants,no,2,Plant tray — stock in trays of 2
+HF-PLA-SWD-1000,Sweet White Dragon Fruit Plant Tray (1000 or 600 Plants),Dragon Fruit Plants & Cuttings,plant_tray,28000.00,0,1,sweet-white-dragon-fruit-plant-tray-1000-or-600-plants,no,2,Plant tray — stock in trays of 2
+HF-PLA-PHZ-600,Purple Haze Wholesale Plant Tray (600 or 150 Plants),Dragon Fruit Plants & Cuttings,plant_tray,32000.00,0,1,purple-haze-wholesale-plant-tray-600-or-150-plants,no,2,Plant tray — stock in trays of 2
+HF-PLA-GIS-600,Golden Israel 600 Plant Tray,Dragon Fruit Plants & Cuttings,plant_tray,45000.00,0,1,golden-israel-600-plant-tray,no,2,Plant tray — stock in trays of 2
+HF-PLA-SWC-TRAY,Sweet White Crystal Wholesale Plant Trays (150 – 1000 Plants),Dragon Fruit Plants & Cuttings,plant_tray,45000.00,0,1,sweet-white-crystal-wholesale-plant-trays-150-1000-plants,no,2,Plant tray — stock in trays of 2
+HF-PLA-AFR-600,Black Dragon Fruit Africana Hybrid (600 Plant Tray / Premium Rare Variety),Dragon Fruit Plants & Cuttings,plant_tray,48000.00,0,1,black-dragon-fruit-africana-hybrid-600-plant-tray-premium-rare-variety,no,2,Plant tray — stock in trays of 2
+HF-FER-CHL-1KG,Premium Chlorella Growth Fertilizer,Micro Algae,live_culture,500.00,0,1,premium-chlorella-growth-fertilizer,no,20,Live culture — stock in batches of 20
+HF-FER-SPI-1KG,Premium Spirulina Growth Fertilizer,Micro Algae,live_culture,500.00,0,1,premium-spirulina-growth-fertilizer,no,20,Live culture — stock in batches of 20
+HF-ALG-CHL-10L,Chlorella Vulgaris Live Culture (Retail & Home Volumes),Micro Algae,live_culture,6499.00,0,1,chlorella-vulgaris-live-culture-retail-home-volumes,no,20,Live culture — stock in batches of 20
+HF-ALG-SPI-10L,Spirulina Platensis Live Culture (Retail & Home Volumes),Micro Algae,live_culture,6499.00,0,1,spirulina-platensis-live-culture-retail-home-volumes,no,20,Live culture — stock in batches of 20
+HF-ALG-CHL-20L,20L Chlorella Vulgaris Live Culture,Micro Algae,live_culture,12499.00,0,1,20l-chlorella-vulgaris-live-culture,no,20,Live culture — stock in batches of 20
+HF-ALG-SPI-20L,20L Spirulina Platensis Live Culture,Micro Algae,live_culture,12499.00,0,1,20l-spirulina-platensis-live-culture,no,20,Live culture — stock in batches of 20
+HF-ALG-CHL-50L,50L Chlorella Vulgaris Live Culture,Micro Algae,live_culture,29999.00,0,1,50l-chlorella-vulgaris-live-culture,no,20,Live culture — stock in batches of 20
+HF-ALG-SPI-50L,50L Spirulina Platensis Live Culture,Micro Algae,live_culture,29999.00,0,1,50l-spirulina-platensis-live-culture,no,20,Live culture — stock in batches of 20
+HF-ALG-CHL-100L,100L Chlorella Vulgaris Live Culture,Micro Algae,live_culture,54999.00,0,1,100l-chlorella-vulgaris-live-culture,no,20,Live culture — stock in batches of 20
+HF-ALG-SPI-100L,100L Spirulina Platensis Live Culture,Micro Algae,live_culture,54999.00,0,1,100l-spirulina-platensis-live-culture,no,20,Live culture — stock in batches of 20

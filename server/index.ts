@@ -1550,8 +1550,19 @@ async function deliverDigitalPurchases(order: PaymentOrder): Promise<void> {
   try {
     // getPaymentOrder only selects the payment fields, so the buyer address is
     // read here rather than assumed to be on the object.
-    const rows = await query<RowDataPacket[]>("SELECT guest_email FROM orders WHERE id = ? LIMIT 1", [order.id]);
-    const email = String((rows as unknown as Array<Record<string, unknown>>)[0]?.guest_email || "");
+    const rows = await query<RowDataPacket[]>(
+      "SELECT guest_email, shipping_address, billing_address FROM orders WHERE id = ? LIMIT 1", [order.id]
+    );
+    const buyer = ((rows as unknown as Array<Record<string, unknown>>)[0] || {}) as Record<string, unknown>;
+    const addr = (key: string) => (buyer[key] || {}) as Record<string, unknown>;
+    // Guest checkout fills guest_email; a signed-in buyer's address lives on the
+    // billing or shipping record, so check all three before giving up.
+    const email = String(
+      buyer.guest_email ||
+      addr("billing_address").email ||
+      addr("shipping_address").email ||
+      ""
+    ).trim();
     if (!email) {
       console.warn(`Digital links for ${order.order_number} could not be emailed: the order has no customer address.`);
     }
@@ -1590,11 +1601,11 @@ async function sendOrderConfirmationEmailInternal(order: PaymentOrder) {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return;
   try {
     const items = await query<RowDataPacket[]>(
-      "SELECT product_name, product_sku, quantity, unit_price_zar, line_total_zar FROM order_items WHERE order_id = ?",
+      "SELECT product_name, product_sku, quantity, unit_price_zar, total_price_zar FROM order_items WHERE order_id = ?",
       [order.id]
     );
     const lines = (items as unknown as Array<Record<string, unknown>>)
-      .map((i) => `• ${i.product_name} (${i.product_sku}) × ${i.quantity} — R${Number(i.line_total_zar ?? (Number(i.unit_price_zar) * Number(i.quantity))).toFixed(2)}`)
+      .map((i) => `• ${i.product_name} (${i.product_sku}) × ${i.quantity} — R${Number(i.total_price_zar ?? (Number(i.unit_price_zar) * Number(i.quantity))).toFixed(2)}`)
       .join("\n");
     const addrRows = await query<RowDataPacket[]>("SELECT shipping_address, guest_email FROM orders WHERE id = ?", [order.id]);
     const shipping = ((addrRows as unknown as Array<Record<string, unknown>>)[0]?.shipping_address || {}) as Record<string, unknown>;
@@ -3192,32 +3203,198 @@ app.get("/api/digital/status/:token", async (req, res) => {
 });
 
 // The actual delivery. Counts the download only once the signed URL is issued.
+// The buyer's download page.
+//
+// A purchase can carry several files (PDF and EPUB), so this page shows what is
+// available instead of firing a file at the visitor. With ?format= it serves
+// that format; without it, a single-format book downloads straight away as it
+// always did, so existing emailed links keep working unchanged.
 app.get("/download/:token", async (req, res) => {
   const token = String(req.params.token || "");
+  const requested = String(req.query.format || "").trim() || undefined;
+  const page = (title: string, body: string) =>
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">
+     <meta name="viewport" content="width=device-width,initial-scale=1">
+     <meta name="robots" content="noindex,nofollow">
+     <title>${title}</title></head>
+     <body style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:640px;margin:56px auto;padding:0 20px;color:#1f2937;line-height:1.6;">
+     ${body}
+     <hr style="margin:32px 0;border:none;border-top:1px solid #e5e7eb;">
+     <p style="color:#6b7280;font-size:13px;">Need help? Email
+     <a href="mailto:dfsa.africa@proagrisa.co.za" style="color:#2f6b3a;">dfsa.africa@proagrisa.co.za</a>
+     or WhatsApp <a href="https://wa.me/27834474639" style="color:#2f6b3a;">+27 83 447 4639</a>.</p>
+     </body></html>`;
+
   try {
-    const check = await resolveDownload(query, token);
+    const check = await resolveDownload(query, token, requested);
+
     if (!check.ok) {
-      return res.status(check.status).send(
-        `<!doctype html><html><head><meta charset="utf-8"><title>Download unavailable</title></head>
-         <body style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:560px;margin:80px auto;padding:0 20px;color:#222;">
-         <h1 style="color:#2f6b3a;font-size:22px;">Download unavailable</h1>
-         <p>${check.reason}</p>
-         <p style="color:#666;font-size:14px;">Need help? Email <a href="mailto:dfsa.africa@proagrisa.co.za">dfsa.africa@proagrisa.co.za</a>
-         or WhatsApp <a href="https://wa.me/27834474639">+27 83 447 4639</a>.</p>
-         </body></html>`
-      );
+      // A wrong format is recoverable: show the formats that do exist rather than
+      // a dead end.
+      const offer = check.formats && check.formats.length
+        ? `<ul style="padding-left:20px;">${check.formats.map((f) =>
+            `<li style="margin:6px 0;"><a href="/download/${token}?format=${encodeURIComponent(f.format)}"
+              style="color:#2f6b3a;font-weight:600;">Download ${f.format}</a>${f.label ? ` — ${f.label}` : ""}</li>`
+          ).join("")}</ul>`
+        : "";
+      return res.status(check.status).send(page("Download unavailable",
+        `<h1 style="color:#2f6b3a;font-size:22px;">Download unavailable</h1>
+         <p>${check.reason}</p>${offer}`));
     }
-    const signedUrl = await signedStorageUrl(check.fileKey, 300);
-    if (!signedUrl) {
-      await recordDownloadEvent(query, check.id, token, req.ip || null, String(req.get("user-agent") || ""), "sign_failed");
-      return res.status(502).send("We could not prepare your download just now. Please try again in a moment.");
+
+    // A single-format book keeps the original one-click behaviour.
+    const serve = async (format: string) => {
+      const one = await resolveDownload(query, token, format);
+      if (!one.ok) return null;
+      const signedUrl = await signedStorageUrl(one.fileKey, 300);
+      if (!signedUrl) {
+        await recordDownloadEvent(query, one.id, token, req.ip || null, String(req.get("user-agent") || ""), "sign_failed", format);
+        return null;
+      }
+      await incrementDownloadCount(query, one.id);
+      await recordDownloadEvent(query, one.id, token, req.ip || null, String(req.get("user-agent") || ""), "ok", format);
+      return { signedUrl, fileName: one.fileName };
+    };
+
+    if (check.formats.length === 1 && !requested) {
+      const served = await serve(check.selectedFormat);
+      if (served) return res.redirect(302, served.signedUrl);
+      return res.status(502).send(page("Download unavailable",
+        `<h1 style="color:#2f6b3a;font-size:22px;">Download unavailable</h1>
+         <p>We could not prepare your download just now. Please try again in a moment.</p>`));
     }
-    await incrementDownloadCount(query, check.id);
-    await recordDownloadEvent(query, check.id, token, req.ip || null, String(req.get("user-agent") || ""), "ok");
-    return res.redirect(302, signedUrl);
+
+    // A specific format was asked for: serve it.
+    if (requested) {
+      const served = await serve(check.selectedFormat);
+      if (served) return res.redirect(302, served.signedUrl);
+      return res.status(429).send(page("Download limit reached",
+        `<h1 style="color:#2f6b3a;font-size:22px;">Download limit reached</h1>
+         <p>You have already downloaded the ${check.selectedFormat} version the maximum number of times for this link.</p>
+         <p>Your other formats are still available:</p>
+         <ul style="padding-left:20px;">${check.formats.map((f) =>
+            `<li style="margin:6px 0;"><a href="/download/${token}?format=${encodeURIComponent(f.format)}"
+              style="color:#2f6b3a;font-weight:600;">Download ${f.format}</a></li>`).join("")}</ul>
+         <p>If you need more downloads of this format, contact us and we will reissue your link.</p>`));
+    }
+
+    // Several formats and none chosen: let the buyer pick.
+    return res.status(200).send(page(check.productName,
+      `<h1 style="color:#2f6b3a;font-size:24px;margin-bottom:4px;">${check.productName}</h1>
+       <p style="color:#4b5563;margin-top:0;">Thank you for your purchase. Choose the format you would like to download.</p>
+       <div style="display:flex;flex-direction:column;gap:12px;margin-top:24px;">
+         ${check.formats.map((f) => `
+           <a href="/download/${token}?format=${encodeURIComponent(f.format)}"
+              style="display:block;padding:14px 18px;border:1px solid #d1d5db;border-radius:10px;text-decoration:none;color:#1f2937;background:#f9fafb;">
+             <strong style="color:#2f6b3a;">${f.format}</strong>
+             ${f.label ? `<span style="color:#4b5563;"> — ${f.label}</span>` : ""}
+             ${f.fileSize ? `<span style="color:#9ca3af;font-size:13px;"> (${(f.fileSize / 1048576).toFixed(1)} MB)</span>` : ""}
+           </a>`).join("")}
+       </div>
+       <p style="color:#6b7280;font-size:13px;margin-top:20px;">Your link covers every format above, each with its own download allowance. Keep this email for later.</p>`));
   } catch (error) {
     console.warn("Digital download failed", error instanceof Error ? error.message : String(error));
-    return res.status(500).send("We could not prepare your download just now. Please try again in a moment.");
+    return res.status(500).send(page("Download unavailable",
+      `<h1 style="color:#2f6b3a;font-size:22px;">Download unavailable</h1>
+       <p>We could not prepare your download just now. Please try again in a moment.</p>`));
+  }
+});
+
+// Admin: the formats (PDF, EPUB, ...) attached to one ebook.
+app.get("/api/admin/digital/formats/:productId", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const rows = await query<RowDataPacket[]>(
+      `SELECT id, format, file_key, file_name, file_size, label, sort_order
+         FROM digital_product_files WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
+      [String(req.params.productId)]
+    );
+    return res.json({ data: { formats: rows }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Lookup failed", "DIGITAL_ERROR", 500));
+  }
+});
+
+// Admin: add or replace one format on an ebook. The unique key is (product, format),
+// so re-uploading a PDF replaces the old file rather than stacking duplicates.
+app.post("/api/admin/digital/formats", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const productId = String(req.body?.productId || "").trim();
+    const format = String(req.body?.format || "").trim().toUpperCase();
+    const fileKey = String(req.body?.fileKey || "").trim();
+    if (!productId || !fileKey) {
+      return res.status(400).json(apiError("A product and an uploaded file are required", "FORMAT_INVALID", 400));
+    }
+    if (!/^[A-Z0-9]{2,16}$/.test(format)) {
+      return res.status(400).json(apiError("Format must be a short code such as PDF or EPUB", "FORMAT_INVALID", 400));
+    }
+    const fileName = String(req.body?.fileName || "").trim() || `download.${format.toLowerCase()}`;
+    const fileSize = req.body?.fileSize ? Number(req.body.fileSize) : null;
+    const label = String(req.body?.label || "").trim() || null;
+    const sortOrder = Number(req.body?.sortOrder) || 0;
+
+    await query<ResultSetHeader>(
+      `INSERT INTO digital_product_files (product_id, format, file_key, file_name, file_size, label, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE file_key = VALUES(file_key), file_name = VALUES(file_name),
+         file_size = VALUES(file_size), label = VALUES(label), sort_order = VALUES(sort_order)`,
+      [productId, format, fileKey, fileName, fileSize, label, sortOrder]
+    );
+    // Keep the product's primary fields pointing at a real file so the rest of the
+    // system (emails, older admin screens) still sees a sensible default.
+    await query<ResultSetHeader>(
+      `UPDATE products SET is_digital = 1,
+         digital_file_key = COALESCE(NULLIF(digital_file_key, ''), ?),
+         digital_file_name = COALESCE(NULLIF(digital_file_name, ''), ?),
+         digital_file_format = COALESCE(NULLIF(digital_file_format, ''), ?)
+       WHERE id = ?`,
+      [fileKey, fileName, format, productId]
+    );
+    const rows = await query<RowDataPacket[]>(
+      `SELECT id, format, file_key, file_name, file_size, label, sort_order
+         FROM digital_product_files WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
+      [productId]
+    );
+    return res.json({ data: { formats: rows }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not save the format", "DIGITAL_ERROR", 500));
+  }
+});
+
+// Admin: remove one format. A book must keep at least one file, otherwise the
+// purchase would deliver nothing.
+app.post("/api/admin/digital/formats/remove", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+    const id = Number(req.body?.id) || 0;
+    if (!id) return res.status(400).json(apiError("A format id is required", "FORMAT_INVALID", 400));
+    const rows = await query<RowDataPacket[]>(
+      "SELECT product_id FROM digital_product_files WHERE id = ? LIMIT 1", [id]
+    );
+    const row = (rows as unknown as Array<Record<string, unknown>>)[0];
+    if (!row) return res.status(404).json(apiError("That format no longer exists", "FORMAT_NOT_FOUND", 404));
+    const counts = await query<RowDataPacket[]>(
+      "SELECT COUNT(*) AS n FROM digital_product_files WHERE product_id = ?", [String(row.product_id)]
+    );
+    if ((Number(((counts as unknown as Array<Record<string, unknown>>)[0] || {}).n) || 0) <= 1) {
+      return res.status(409).json(apiError("An ebook needs at least one file. Upload a replacement before removing this one.", "FORMAT_LAST", 409));
+    }
+    await query<ResultSetHeader>("DELETE FROM digital_product_files WHERE id = ?", [id]);
+    const remaining = await query<RowDataPacket[]>(
+      `SELECT id, format, file_key, file_name, file_size, label, sort_order
+         FROM digital_product_files WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
+      [String(row.product_id)]
+    );
+    return res.json({ data: { formats: remaining }, error: null });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Could not remove the format", "DIGITAL_ERROR", 500));
   }
 });
 
