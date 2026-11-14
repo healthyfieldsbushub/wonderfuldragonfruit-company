@@ -2298,14 +2298,19 @@ async function createOrderFromCart(body: Record<string, any>) {
   if (!items.length) throw new Error("Order must contain at least one item");
   const ids = items.map((item: any) => String(item.productId || ""));
   const placeholders = ids.map(() => "?").join(",");
-  const products = await query<RowDataPacket[]>(`SELECT id, sku, name, price_zar, stock_quantity, allow_backorder, weight_kg, length_cm, width_cm, height_cm FROM products WHERE id IN (${placeholders}) AND is_active = 1`, ids);
+  const products = await query<RowDataPacket[]>(`SELECT id, sku, name, price_zar, stock_quantity, allow_backorder, is_digital, weight_kg, length_cm, width_cm, height_cm FROM products WHERE id IN (${placeholders}) AND is_active = 1`, ids);
   const byId = new Map(products.map((product) => [String(product.id), product]));
   let subtotal = 0;
   const normalized = items.map((item: any) => {
     const product = byId.get(String(item.productId));
     const quantity = Math.max(1, Math.floor(Number(item.quantity || 1)));
     if (!product) throw new Error(`Product ${item.productId} is unavailable`);
-    if (!product.allow_backorder && Number(product.stock_quantity) < quantity) throw new Error(`${product.name} is out of stock`);
+    // A digital download has no inventory, so an empty stock_quantity must never
+    // block a sale. Physical goods keep the existing rule.
+    const isDigitalProduct = Number(product.is_digital) === 1;
+    if (!isDigitalProduct && !product.allow_backorder && Number(product.stock_quantity) < quantity) {
+      throw new Error(`${product.name} is out of stock`);
+    }
     const unit = Number(product.price_zar);
     subtotal += unit * quantity;
     return { product, quantity, unit };
@@ -3217,6 +3222,139 @@ app.get("/download/:token", async (req, res) => {
 });
 
 // Admin: every issued entitlement, newest first.
+// Admin: the digital-download dashboard. Answers four questions the business
+// actually asks: which ebooks sell, how many links are out there, how many
+// downloads buyers have left, and which titles keep needing reissuing.
+app.get("/api/admin/digital/dashboard", async (req, res) => {
+  try {
+    if (!(await hasAdminPasswordAccess(req))) {
+      return res.status(401).json(apiError("Verified admin access is required", "ADMIN_AUTH_REQUIRED", 401));
+    }
+
+    // Per-ebook rollup. Driven from products so an ebook with no sales yet still
+    // appears, and widened to include any product that has issued links even if
+    // it is no longer flagged digital, so nothing is silently hidden.
+    const perEbook = await query<RowDataPacket[]>(
+      `SELECT
+         p.id                     AS product_id,
+         p.name                   AS product_name,
+         p.price_zar              AS price_zar,
+         p.is_active              AS is_active,
+         COALESCE(s.units_sold, 0)        AS units_sold,
+         COALESCE(s.revenue, 0)           AS revenue,
+         COALESCE(d.tokens_issued, 0)     AS tokens_issued,
+         COALESCE(d.tokens_active, 0)     AS tokens_active,
+         COALESCE(d.downloads_used, 0)    AS downloads_used,
+         COALESCE(d.downloads_allowed, 0) AS downloads_allowed,
+         COALESCE(d.reissues, 0)          AS reissues,
+         COALESCE(d.never_downloaded, 0)  AS never_downloaded,
+         d.last_issued_at                 AS last_issued_at
+       FROM products p
+       LEFT JOIN (
+         SELECT oi.product_id,
+                SUM(oi.quantity)        AS units_sold,
+                SUM(oi.total_price_zar) AS revenue
+           FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+          WHERE o.payment_status = 'paid'
+          GROUP BY oi.product_id
+       ) s ON s.product_id = p.id
+       LEFT JOIN (
+         SELECT product_id,
+                COUNT(*) AS tokens_issued,
+                SUM(CASE WHEN revoked = 0 AND (expires_at IS NULL OR expires_at > NOW()) THEN 1 ELSE 0 END) AS tokens_active,
+                SUM(download_count) AS downloads_used,
+                SUM(max_downloads)  AS downloads_allowed,
+                SUM(reissue_count)  AS reissues,
+                SUM(CASE WHEN download_count = 0 THEN 1 ELSE 0 END) AS never_downloaded,
+                MAX(created_at)     AS last_issued_at
+           FROM digital_downloads
+          GROUP BY product_id
+       ) d ON d.product_id = p.id
+      WHERE p.is_digital = 1 OR d.product_id IS NOT NULL
+      ORDER BY units_sold DESC, tokens_issued DESC, p.name ASC`
+    );
+
+    // Links the buyer has almost used up, or that have expired. These are the
+    // ones that generate support mail, so they are surfaced rather than buried.
+    const attention = await query<RowDataPacket[]>(
+      `SELECT id, order_number, product_id, product_name, email,
+              download_count, max_downloads,
+              (max_downloads - download_count) AS remaining,
+              expires_at, last_downloaded_at, reissue_count
+         FROM digital_downloads
+        WHERE revoked = 0
+          AND ((max_downloads - download_count) <= 1
+               OR (expires_at IS NOT NULL AND expires_at < NOW()))
+        ORDER BY remaining ASC, last_downloaded_at DESC
+        LIMIT 50`
+    );
+
+    // Titles that needed links replacing most often. A high count on one title
+    // usually means its delivery email is not arriving, not that it is popular.
+    const topReissues = await query<RowDataPacket[]>(
+      `SELECT product_id,
+              MAX(product_name) AS product_name,
+              SUM(reissue_count) AS reissues,
+              COUNT(*) AS tokens_issued
+         FROM digital_downloads
+        WHERE reissue_count > 0
+        GROUP BY product_id
+        ORDER BY reissues DESC
+        LIMIT 10`
+    );
+
+    const summaryRows = await query<RowDataPacket[]>(
+      `SELECT
+         COUNT(*) AS tokens_issued,
+         SUM(CASE WHEN revoked = 0 AND (expires_at IS NULL OR expires_at > NOW()) THEN 1 ELSE 0 END) AS tokens_active,
+         SUM(CASE WHEN revoked = 1 THEN 1 ELSE 0 END) AS tokens_revoked,
+         SUM(download_count) AS downloads_used,
+         SUM(max_downloads)  AS downloads_allowed,
+         SUM(reissue_count)  AS reissues,
+         SUM(CASE WHEN download_count = 0 THEN 1 ELSE 0 END) AS never_downloaded
+       FROM digital_downloads`
+    );
+    const s = ((summaryRows as unknown as Array<Record<string, unknown>>)[0] || {});
+    const num = (v: unknown) => Number(v) || 0;
+
+    // Revenue and units are read from paid orders, the same source the sales
+    // figures above use, so the totals always agree.
+    const revenueRows = await query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(oi.total_price_zar), 0) AS revenue,
+              COALESCE(SUM(oi.quantity), 0)        AS units
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         JOIN products p ON p.id = oi.product_id
+        WHERE o.payment_status = 'paid' AND p.is_digital = 1`
+    );
+    const rev = ((revenueRows as unknown as Array<Record<string, unknown>>)[0] || {});
+
+    return res.json({
+      data: {
+        summary: {
+          tokensIssued: num(s.tokens_issued),
+          tokensActive: num(s.tokens_active),
+          tokensRevoked: num(s.tokens_revoked),
+          downloadsUsed: num(s.downloads_used),
+          downloadsAllowed: num(s.downloads_allowed),
+          downloadsRemaining: Math.max(0, num(s.downloads_allowed) - num(s.downloads_used)),
+          reissues: num(s.reissues),
+          neverDownloaded: num(s.never_downloaded),
+          unitsSold: num(rev.units),
+          revenue: num(rev.revenue),
+        },
+        perEbook: perEbook,
+        attention: attention,
+        topReissues: topReissues,
+      },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(500).json(apiError(error instanceof Error ? error.message : "Dashboard lookup failed", "DIGITAL_ERROR", 500));
+  }
+});
+
 app.get("/api/admin/digital/downloads", async (req, res) => {
   try {
     if (!(await hasAdminPasswordAccess(req))) {
@@ -3264,11 +3402,19 @@ app.post("/api/admin/digital/reissue", async (req, res) => {
     );
     const order = (orders as unknown as Array<Record<string, unknown>>)[0];
     if (!order) return res.status(404).json(apiError("Order not found", "ORDER_NOT_FOUND", 404));
+    // Carry the existing count forward before the old rows are withdrawn, so a
+    // second reissue does not reset the history to one.
+    const prior = await query<RowDataPacket[]>(
+      "SELECT COALESCE(MAX(reissue_count), 0) AS n FROM digital_downloads WHERE order_id = ?",
+      [String(order.id)]
+    );
+    const priorCount = Number(((prior as unknown as Array<Record<string, unknown>>)[0] || {}).n) || 0;
     await query<ResultSetHeader>("UPDATE digital_downloads SET revoked = 1 WHERE order_id = ? AND revoked = 0", [String(order.id)]);
     const issued = await issueDigitalEntitlements(query, {
       id: String(order.id),
       orderNumber: order.order_number ? String(order.order_number) : null,
       email: String(order.guest_email || ""),
+      reissueCount: priorCount + 1,
     });
     return res.json({ data: { reissued: issued.length, downloads: issued }, error: null });
   } catch (error) {

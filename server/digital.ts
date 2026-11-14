@@ -101,7 +101,7 @@ export async function isAllDigitalCart(query: QueryFn, productIds: string[]): Pr
  */
 export async function issueDigitalEntitlements(
   query: QueryFn,
-  order: { id: string; orderNumber?: string | null; email: string }
+  order: { id: string; orderNumber?: string | null; email: string; reissueCount?: number }
 ): Promise<IssuedDownload[]> {
   const existing = await query<RowDataPacket[]>(
     "SELECT token, product_name, max_downloads, expires_at FROM digital_downloads WHERE order_id = ? AND revoked = 0",
@@ -130,10 +130,10 @@ export async function issueDigitalEntitlements(
     await query<ResultSetHeader>(
       `INSERT INTO digital_downloads
          (token, order_id, order_number, product_id, product_name, email,
-          max_downloads, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          max_downloads, expires_at, reissue_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [token, order.id, order.orderNumber || null, line.productId, line.productName,
-       order.email, line.downloadLimit, expiresAt]
+       order.email, line.downloadLimit, expiresAt, Math.max(0, Number(order.reissueCount) || 0)]
     );
     issued.push({
       token,
